@@ -1,0 +1,82 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+This document outlines the conventions and best practices for developing the Apify actor in this project. Adhering to these rules ensures code quality, consistency, and maintainability.
+
+### 1. Apify Actor Structure
+
+- **Main Execution Logic**
+  - All actor logic must be wrapped within the `Actor.main(async () => { ... })` function. This ensures proper initialization, event loop management, and actor lifecycle handling.
+  - See [main.js](mdc:main.js) for the reference implementation.
+
+- **Input and Error Handling**
+  - Retrieve actor input using `await Actor.getInput()`.
+  - Perform validation on the input object at the beginning of the execution.
+  - For fatal, unrecoverable errors that should terminate the run, use `await Actor.fail("Error message")`. This marks the actor run as "Failed".
+
+### 2. Data and File Storage
+
+- **Structured Data Output**
+  - Use `await Actor.pushData()` to save structured data (e.g., clip metadata, URLs) to the default `Dataset`.
+  - A summary object should be pushed at the end of the run to provide a quick overview of the results.
+    ```javascript
+    // ✅ DO: Push a summary object
+    const summary = {
+        processedCount: 10,
+        failedCount: 2,
+    };
+    await Actor.pushData({ "#summary": true, ...summary });
+    ```
+
+- **File & Artifact Storage**
+  - Use the `Key-Value Store` for storing binary files like videos and thumbnails.
+  - Access the store via `await Actor.openKeyValueStore()`.
+  - The helper function `uploadToStorage` in [main.js](mdc:main.js) is the standard way to upload files. It correctly handles setting content types and generating a public URL.
+
+### 3. Filesystem Management
+
+- **Temporary Files**
+  - All temporary processing files (downloaded videos, generated clips, thumbnails) must be stored in a temporary directory created using `os.tmpdir()`.
+  - The temporary directory must be cleaned up at the end of the execution, regardless of whether the run succeeded or failed. Use a `try...finally` block to guarantee cleanup.
+
+    ```javascript
+    // ✅ DO: Use a finally block for cleanup
+    const tempDir = path.join(os.tmpdir(), "video-processing");
+    try {
+      // ... processing logic ...
+    } finally {
+      if (fs.existsSync(tempDir)) {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    }
+    ```
+
+### 4. External Processes (ffmpeg, yt-dlp)
+
+- **Execution**
+  - Use `child_process.execSync` for executing external commands like `yt-dlp` and `ffmpeg` as the actor's workflow is primarily linear.
+  - Ensure all command output is piped to the parent process's stdio (`{ stdio: 'inherit' }`) for clear logging during development and on the Apify platform.
+
+- **Proxy Usage**
+  - All external network requests, especially video downloads, must be routed through Apify's proxy when a proxy is configured in the input.
+  - Use `await Actor.createProxyUrl()` to get a proxy URL for `yt-dlp`.
+
+    ```javascript
+    // ✅ DO: Use Apify proxy for downloads
+    if (proxy) {
+        const proxyUrl = await Actor.createProxyUrl();
+        ytDlpCommand += ` --proxy "${proxyUrl}"`;
+    }
+    ```
+
+### 5. Code Style and Dependencies
+
+- **Dependencies**
+  - This project uses `npm`. All dependencies must be managed through `package.json`, and the `package-lock.json` file must be kept up to date.
+  
+- **Code Conventions**
+  - Follow modern JavaScript (ESM) syntax (`import`/`export`).
+  - Use descriptive variable and function names.
+  - Favor helper functions for repetitive tasks, as demonstrated by `uploadToStorage` in [main.js](mdc:main.js).

@@ -1,0 +1,251 @@
+{
+	"actorSpecification": 1,
+	"name": "youtube-video-clipper",
+	"version": "1.1",
+	"buildTag": "latest",
+	"title": "YouTube Video Clipper",
+	"description": "Extract clips from YouTube videos based on timestamps",
+	"dockerfile": "./Dockerfile",
+	"readme": "./README.md",
+	"input": "./INPUT_SCHEMA.json",
+	"storages": {
+		"dataset": {
+			"actorSpecification": 1,
+			"fields": {
+				"type": "object",
+				"properties": {
+					"tweetId": {
+						"type": "string",
+						"title": "Tweet ID",
+						"description": "Unique identifier for the tweet/clip"
+					},
+					"tweetText": {
+						"type": "string",
+						"title": "Tweet Text",
+						"description": "Text content associated with the clip"
+					},
+					"startTime": {
+						"type": "string",
+						"title": "Start Time",
+						"description": "Clip start time in HH:MM:SS format"
+					},
+					"endTime": {
+						"type": "string",
+						"title": "End Time", 
+						"description": "Clip end time in HH:MM:SS format"
+					},
+					"duration": {
+						"type": "number",
+						"title": "Duration",
+						"description": "Clip duration in seconds"
+					},
+					"filename": {
+						"type": "string",
+						"title": "Filename",
+						"description": "Generated filename for the clip"
+					},
+					"url": {
+						"type": "string",
+						"title": "Download URL",
+						"description": "Public URL to download the clip"
+					},
+					"size": {
+						"type": "number",
+						"title": "File Size",
+						"description": "File size in bytes"
+					},
+					"videoUrl": {
+						"type": "string", 
+						"title": "Source Video",
+						"description": "Original YouTube video URL"
+					},
+					"clipIndex": {
+						"type": "number",
+						"title": "Clip Index",
+						"description": "Order of this clip in the batch"
+					},
+					"thumbnailUrl": {
+						"type": "string",
+						"title": "Thumbnail",
+						"description": "URL to video thumbnail"
+					},
+					"quality": {
+						"type": "string",
+						"title": "Quality",
+						"description": "Video quality setting"
+					},
+					"outputFormat": {
+						"type": "string",
+						"title": "Format",
+						"description": "Output video format"
+					},
+					"processingTime": {
+						"type": "string",
+						"title": "Processed At",
+						"description": "When the clip was processed"
+					},
+					"error": {
+						"type": "string",
+						"title": "Error",
+						"description": "Error message if processing failed"
+					},
+					"failed": {
+						"type": "boolean",
+						"title": "Failed",
+						"description": "Whether the clip processing failed"
+					},
+					"summaryRecord": {
+						"type": "boolean",
+						"title": "Summary Record",
+						"description": "Whether this is a summary record (not billable)"
+					}
+				}
+			},
+			"views": {
+				"overview": {
+					"title": "All Clips",
+					"description": "Complete overview of all processed clips",
+					"transformation": {
+						"fields": [
+							"tweetId",
+							"tweetText", 
+							"url",
+							"startTime",
+							"endTime", 
+							"duration",
+							"size",
+							"thumbnailUrl",
+							"quality",
+							"outputFormat",
+							"clipIndex",
+							"videoUrl",
+							"processingTime"
+						]
+					},
+					"display": {
+						"component": "table",
+						"properties": {
+							"tweetId": {
+								"label": "Tweet ID",
+								"format": "text"
+							},
+							"tweetText": {
+								"label": "Tweet Text",
+								"format": "text"
+							},
+							"url": {
+								"label": "Download",
+								"format": "link"
+							},
+							"startTime": {
+								"label": "Start",
+								"format": "text"
+							},
+							"endTime": {
+								"label": "End", 
+								"format": "text"
+							},
+							"duration": {
+								"label": "Duration (s)",
+								"format": "number"
+							},
+							"size": {
+								"label": "Size (bytes)",
+								"format": "number"
+							},
+							"thumbnailUrl": {
+								"label": "Thumbnail",
+								"format": "image"
+							},
+							"quality": {
+								"label": "Quality",
+								"format": "text"
+							},
+							"outputFormat": {
+								"label": "Format",
+								"format": "text"
+							},
+							"clipIndex": {
+								"label": "Clip #",
+								"format": "number"
+							},
+							"videoUrl": {
+								"label": "Source Video",
+								"format": "link"
+							},
+							"processingTime": {
+								"label": "Processed At",
+								"format": "date"
+							}
+						}
+					}
+				},
+				"successful": {
+					"title": "Successful Clips",
+					"description": "Only successfully processed clips (billable items)",
+					"transformation": {
+						"fields": [
+							"tweetId",
+							"tweetText",
+							"url", 
+							"startTime",
+							"endTime",
+							"duration",
+							"size",
+							"thumbnailUrl"
+						],
+						"omit": ["failed", "error", "summaryRecord"]
+					},
+					"display": {
+						"component": "table",
+						"properties": {
+							"tweetId": {
+								"label": "Tweet ID",
+								"format": "text"
+							},
+							"tweetText": {
+								"label": "Tweet Text", 
+								"format": "text"
+							},
+							"url": {
+								"label": "Download",
+								"format": "link"
+							},
+							"startTime": {
+								"label": "Start",
+								"format": "text"
+							},
+							"endTime": {
+								"label": "End",
+								"format": "text"
+							},
+							"duration": {
+								"label": "Duration (s)",
+								"format": "number"
+							},
+							"size": {
+								"label": "Size (bytes)",
+								"format": "number"
+							},
+							"thumbnailUrl": {
+								"label": "Thumbnail",
+								"format": "image"
+							}
+						}
+					}
+				}
+			}
+		}
+	},
+	"categories": ["ENTERTAINMENT"],
+	"tags": ["youtube", "video", "clips", "ffmpeg", "social-media"],
+	"defaultRunOptions": {
+		"build": "latest",
+		"timeoutSecs": 3600,
+		"memoryMbytes": 4096
+	},
+	"author": {
+		"name": "Your Name",
+		"email": "your.email@example.com"
+	}
+}

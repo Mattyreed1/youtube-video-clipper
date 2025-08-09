@@ -1,0 +1,32 @@
+{
+  "name": "youtube-video-clipper",
+  "version": "1.0.0",
+  "description": "YouTube Video Clipper - Extract clips from YouTube videos based on timestamps",
+  "main": "main.js",
+  "type": "module",
+  "scripts": {
+    "start": "node main.js"
+  },
+  "dependencies": {
+    "apify": "^3.0.0",
+    "axios": "^1.6.0"
+  },
+  "devDependencies": {
+    "@apify/storage-local": "^2.1.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "youtube",
+    "video",
+    "clips",
+    "extraction",
+    "ffmpeg",
+    "yt-dlp",
+    "apify",
+    "automation"
+  ],
+  "author": "Your Name",
+  "license": "MIT"
+}

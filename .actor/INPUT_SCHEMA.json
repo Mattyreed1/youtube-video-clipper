@@ -1,0 +1,68 @@
+{
+  "title": "YouTube Video Clipper Input",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "videoUrl": {
+      "title": "YouTube Video URL",
+      "type": "string",
+      "description": "The YouTube video URL to download and extract clips from.\n\n🔧 TROUBLESHOOTING ORDER:\n1. Try with just the URL first\n2. If rate limited → Enable Proxy\n3. If \"video unavailable\" → Add Cookies\n4. For maximum reliability → Use both",
+      "editor": "textfield",
+      "example": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      "prefill": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    },
+    "clips": {
+      "title": "Clips to Extract",
+      "type": "array",
+      "description": "A list of clips to extract from the video, in JSON format.",
+      "editor": "json",
+      "prefill": [
+        {
+          "name": "test_clip",
+          "start": "00:00:05",
+          "end": "00:00:15"
+        }
+      ]
+    },
+    "maxRetries": {
+      "title": "Maximum Retry Attempts",
+      "type": "integer",
+      "description": "Maximum number of retry attempts for failed downloads",
+      "default": 3,
+      "minimum": 1,
+      "maximum": 10
+    },
+    "maxResolution": {
+      "title": "Maximum Video Resolution",
+      "type": "string",
+      "description": "Maximum resolution for downloaded video clips. Lower resolution reduces costs and data usage.",
+      "enum": ["480", "720"],
+      "enumTitles": ["480p (Recommended)", "720p (Higher Quality, Slower, More Expensive)"],
+      "default": "480"
+    },
+    "useCookies": {
+      "title": "Use YouTube Cookies",
+      "type": "boolean",
+      "description": "Check this box to enable the use of YouTube cookies for the download. The cookies from the field below will only be used if this is checked.",
+      "default": false
+    },
+    "cookies": {
+      "title": "YouTube Cookies Content",
+      "type": "string",
+      "description": "Use only if you get \"Video unavailable\" or \"Sign in to confirm\" errors. Get cookies using browser extensions: [Chrome](https://chrome.google.com/webstore/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc) or [Firefox](https://addons.mozilla.org/en-US/firefox/addon/cookies-txt/). Leave empty if downloads work without errors.",
+      "editor": "textarea",
+      "isSecret": true
+    },
+    "proxy": {
+      "title": "Proxy Configuration",
+      "type": "object",
+      "description": "Proxy is enabled by default for maximum reliability. Use if you get rate limiting (429) or IP blocking errors. See [Apify Proxy documentation](https://docs.apify.com/platform/proxy) for details.",
+      "editor": "proxy",
+      "prefill": {
+        "useApifyProxy": true,
+        "apifyProxyGroups": ["RESIDENTIAL"]
+      }
+    }
+  },
+  "required": ["videoUrl", "clips"]
+}
