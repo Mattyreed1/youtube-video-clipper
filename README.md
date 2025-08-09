@@ -203,6 +203,60 @@ run = client.actor('YOUR_ACTOR_ID').call(run_input={
 
 Check out the [Apify API documentation](https://docs.apify.com/api/v2) for full details.
 
+## 🔄 Real-time Webhook Integration
+
+YouTube Video Clipper pushes each clip to the dataset **immediately after processing**, making it perfect for real-time integrations. You can receive instant notifications when clips are ready using webhooks.
+
+### How It Works
+
+1. **Each clip is pushed individually** - As soon as a clip is processed, it's available in the dataset
+2. **Webhooks fire immediately** - Get notified for each clip without waiting for the entire run to complete
+3. **Upload to your app in real-time** - Process clips as they arrive, not in bulk at the end
+
+### Setting Up Webhooks
+
+Configure webhooks when starting the actor run:
+
+```javascript
+const run = await client.actor('YOUR_ACTOR_ID').call({
+  videoUrl: 'https://www.youtube.com/watch?v=VIDEO_ID',
+  clips: [
+    { name: 'clip1', start: '00:00:10', end: '00:00:20' }
+  ],
+  webhooks: [
+    {
+      eventTypes: ['ACTOR.RUN.DATASET_ITEM_ADDED'],
+      requestUrl: 'https://your-app.com/api/webhooks/new-clip'
+    }
+  ]
+});
+```
+
+### Webhook Payload
+
+Your endpoint receives this data for each clip:
+
+```json
+{
+  "name": "clip1",
+  "url": "https://api.apify.com/v2/key-value-stores/.../clip.mp4",
+  "thumbnailUrl": "https://api.apify.com/v2/key-value-stores/.../thumb.jpg",
+  "duration": 10,
+  "size": 2457600,
+  "startTime": "00:00:10",
+  "endTime": "00:00:20",
+  "failed": false
+}
+```
+
+### Example Implementation
+
+See the `/examples` folder for complete webhook handler implementations:
+- `webhook-handler.js` - Basic webhook receiver
+- `webhook-handler-production.js` - Production-ready with retry logic
+- `run-with-webhook.js` - How to start the actor with webhooks
+- `test-webhook-locally.md` - Testing guide with ngrok
+
 ## ❓ FAQ
 
 ### How much does it cost to use YouTube Video Clipper?
