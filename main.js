@@ -7,6 +7,93 @@ import crypto from "crypto";
 import axios from "axios";
 
 /**
+ * Helper function to clean YouTube video URL by removing problematic parameters.
+ * @param {string} url - The URL to clean.
+ * @returns {Object} - Object with cleaned URL and list of removed parameters.
+ */
+const cleanYouTubeUrl = (url) => {
+    if (!url || typeof url !== 'string') {
+        return { cleanedUrl: null, removedParams: [], error: 'Video URL must be a non-empty string.' };
+    }
+
+    try {
+        const urlObj = new URL(url);
+        
+        // Check if it's a YouTube URL
+        if (!urlObj.hostname.includes('youtube.com') && !urlObj.hostname.includes('youtu.be')) {
+            return { cleanedUrl: null, removedParams: [], error: 'URL must be a valid YouTube video URL (youtube.com or youtu.be).' };
+        }
+
+        // Check for valid video ID format first
+        let videoId = null;
+        if (urlObj.hostname.includes('youtu.be')) {
+            videoId = urlObj.pathname.slice(1); // Remove leading slash
+        } else if (urlObj.pathname === '/watch') {
+            videoId = urlObj.searchParams.get('v');
+        }
+
+        if (!videoId || videoId.length !== 11) {
+            return { cleanedUrl: null, removedParams: [], error: 'URL must contain a valid YouTube video ID (11 characters).' };
+        }
+
+        // Parameters to remove that cause issues
+        const paramsToRemove = ['list', 'playlist', 'index', 't', 'start', 'end', 'time_continue'];
+        const removedParams = [];
+
+        // Remove problematic parameters
+        for (const param of paramsToRemove) {
+            if (urlObj.searchParams.has(param)) {
+                removedParams.push(param);
+                urlObj.searchParams.delete(param);
+            }
+        }
+
+        // Reconstruct the cleaned URL
+        const cleanedUrl = urlObj.toString();
+
+        return { cleanedUrl, removedParams };
+    } catch (error) {
+        return { cleanedUrl: null, removedParams: [], error: 'Invalid URL format.' };
+    }
+};
+
+/**
+ * Helper function to validate YouTube video URL format.
+ * @param {string} url - The URL to validate.
+ * @returns {Object} - Object with isValid boolean and error message if invalid.
+ */
+const validateYouTubeUrl = (url) => {
+    if (!url || typeof url !== 'string') {
+        return { isValid: false, error: 'Video URL must be a non-empty string.' };
+    }
+
+    try {
+        const urlObj = new URL(url);
+        
+        // Check if it's a YouTube URL
+        if (!urlObj.hostname.includes('youtube.com') && !urlObj.hostname.includes('youtu.be')) {
+            return { isValid: false, error: 'URL must be a valid YouTube video URL (youtube.com or youtu.be).' };
+        }
+
+        // Check for valid video ID format
+        let videoId = null;
+        if (urlObj.hostname.includes('youtu.be')) {
+            videoId = urlObj.pathname.slice(1); // Remove leading slash
+        } else if (urlObj.pathname === '/watch') {
+            videoId = urlObj.searchParams.get('v');
+        }
+
+        if (!videoId || videoId.length !== 11) {
+            return { isValid: false, error: 'URL must contain a valid YouTube video ID (11 characters).' };
+        }
+
+        return { isValid: true };
+    } catch (error) {
+        return { isValid: false, error: 'Invalid URL format.' };
+    }
+};
+
+/**
  * Helper function to generate a random string.
  * @param {number} length - The length of the random string.
  * @returns {string} - The generated random string.
@@ -116,6 +203,22 @@ Actor.main(async () => {
         return;
     }
 
+    // Clean and validate YouTube URL format before processing
+    const urlCleaning = cleanYouTubeUrl(videoUrl);
+    if (urlCleaning.error) {
+        await Actor.fail(`Invalid video URL: ${urlCleaning.error}`);
+        return;
+    }
+
+    // Use cleaned URL if parameters were removed
+    let processedVideoUrl = videoUrl;
+    if (urlCleaning.removedParams.length > 0) {
+        processedVideoUrl = urlCleaning.cleanedUrl;
+        console.log(`Cleaned video URL by removing parameters: ${urlCleaning.removedParams.join(', ')}`);
+        console.log(`Original URL: ${videoUrl}`);
+        console.log(`Cleaned URL: ${processedVideoUrl}`);
+    }
+
     // Charge for run_started event immediately
     const runStartedKey = `run_started_${process.env.APIFY_ACTOR_RUN_ID || Date.now()}`;
     const runStartCharged = await chargeEvent('run_started', runStartedKey);
@@ -190,7 +293,7 @@ Actor.main(async () => {
                 clipPath = path.join(tempDir, `${clipIdentifier}.mp4`);
 
                 // First attempt: download with resolution cap
-                let ytDlpCommand = `yt-dlp --quiet -f "${formatSelector}" --download-sections "*${startTime}-${endTime}" --no-part --no-mtime --remux-video mp4 -o "${clipPath}" "${videoUrl}"`;
+                let ytDlpCommand = `yt-dlp --quiet -f "${formatSelector}" --download-sections "*${startTime}-${endTime}" --no-part --no-mtime --remux-video mp4 -o "${clipPath}" "${processedVideoUrl}"`;
 
                 // Append cookies if provided
                 if (cookieFilePath) {
@@ -213,7 +316,7 @@ Actor.main(async () => {
 
                 // Fallback: try again without the -f selector if the first attempt failed
                 if (!downloadSucceeded) {
-                    ytDlpCommand = `yt-dlp --quiet --download-sections "*${startTime}-${endTime}" --no-part --no-mtime --remux-video mp4 -o "${clipPath}" "${videoUrl}"`;
+                    ytDlpCommand = `yt-dlp --quiet --download-sections "*${startTime}-${endTime}" --no-part --no-mtime --remux-video mp4 -o "${clipPath}" "${processedVideoUrl}"`;
                     if (cookieFilePath) ytDlpCommand += ` --cookies "${cookieFilePath}"`;
                     if (sharedProxyUrl) ytDlpCommand += ` --proxy "${sharedProxyUrl}"`;
                     console.log("Executing yt-dlp fallback with no resolution cap");
@@ -254,7 +357,7 @@ Actor.main(async () => {
                     size: fs.statSync(clipPath).size,
                     outputFormat: 'mp4',
                     clipIndex: index + 1,
-                    videoUrl,
+                    videoUrl: processedVideoUrl,
                     processingTime: new Date().toISOString(),
                     failed: false,
                     charged: clipCharged, // Track if charging was successful
@@ -271,7 +374,7 @@ Actor.main(async () => {
                     endTime: clip.end,
                     error: error.message,
                     clipIndex: index + 1,
-                    videoUrl,
+                    videoUrl: processedVideoUrl,
                     processingTime: new Date().toISOString(),
                     failed: true,
                     charged: false, // Failed clips are not charged
