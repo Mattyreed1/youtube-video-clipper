@@ -56,41 +56,6 @@ const cleanYouTubeUrl = (url) => {
     }
 };
 
-/**
- * Helper function to validate YouTube video URL format.
- * @param {string} url - The URL to validate.
- * @returns {Object} - Object with isValid boolean and error message if invalid.
- */
-const validateYouTubeUrl = (url) => {
-    if (!url || typeof url !== 'string') {
-        return { isValid: false, error: 'Video URL must be a non-empty string.' };
-    }
-
-    try {
-        const urlObj = new URL(url);
-        
-        // Check if it's a YouTube URL
-        if (!urlObj.hostname.includes('youtube.com') && !urlObj.hostname.includes('youtu.be')) {
-            return { isValid: false, error: 'URL must be a valid YouTube video URL (youtube.com or youtu.be).' };
-        }
-
-        // Check for valid video ID format
-        let videoId = null;
-        if (urlObj.hostname.includes('youtu.be')) {
-            videoId = urlObj.pathname.slice(1); // Remove leading slash
-        } else if (urlObj.pathname === '/watch') {
-            videoId = urlObj.searchParams.get('v');
-        }
-
-        if (!videoId || videoId.length !== 11) {
-            return { isValid: false, error: 'URL must contain a valid YouTube video ID (11 characters).' };
-        }
-
-        return { isValid: true };
-    } catch (error) {
-        return { isValid: false, error: 'Invalid URL format.' };
-    }
-};
 
 /**
  * Helper function to generate a random string.
@@ -329,8 +294,7 @@ Actor.main(async () => {
         useCookies,
         cookies,
         maxRetries = 3,
-        quality = '480p', // Quality tier for pricing and format
-        maxResolution = 480, // Legacy support, override with quality setting
+        quality = '480p' // Quality tier for pricing and format
     } = input;
 
     // Comprehensive input validation
