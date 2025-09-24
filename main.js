@@ -430,15 +430,15 @@ Actor.main(async () => {
 
                 console.log(`Creating clip: ${clip.name} from ${clip.start} to ${clip.end} (${duration}s)`);
 
-                // Use quality-based resolution selection
+                // Use quality-based resolution selection with better format fallbacks
                 const height = qualityConfig.height;
-                const formatSelector = `best[height<=${height}]`;
+                const formatSelector = `best[height<=${height}]/best[ext=mp4]/best`;
 
                 // Prepare file paths
                 clipPath = path.join(tempDir, `${clipIdentifier}.mp4`);
 
-                // First attempt: download with resolution cap
-                let ytDlpCommand = `yt-dlp --quiet -f "${formatSelector}" --download-sections "*${startTime}-${endTime}" --no-part --no-mtime --remux-video mp4 -o "${clipPath}" "${processedVideoUrl}"`;
+                // First attempt: download with resolution cap and better options
+                let ytDlpCommand = `yt-dlp --no-check-certificates --ignore-errors --extract-flat false -f "${formatSelector}" --download-sections "*${startTime}-${endTime}" --no-part --no-mtime --remux-video mp4 -o "${clipPath}" "${processedVideoUrl}"`;
 
                 // Append cookies if provided
                 if (cookieFilePath) {
@@ -466,14 +466,14 @@ Actor.main(async () => {
                     downloadSucceeded = false;
                 }
 
-                // Fallback: try again without the -f selector if the first attempt failed
+                // Fallback: try with most compatible settings
                 if (!downloadSucceeded) {
-                    const fallbackCommand = `yt-dlp --quiet --download-sections "*${startTime}-${endTime}" --no-part --no-mtime --remux-video mp4 -o "${clipPath}" "${processedVideoUrl}"`;
+                    const fallbackCommand = `yt-dlp --no-check-certificates --ignore-errors --extract-flat false -f "best/worst" --download-sections "*${startTime}-${endTime}" --no-part --no-mtime --remux-video mp4 -o "${clipPath}" "${processedVideoUrl}"`;
                     let fallbackCmd = fallbackCommand;
                     if (cookieFilePath) fallbackCmd += ` --cookies "${cookieFilePath}"`;
                     if (sharedProxyUrl) fallbackCmd += ` --proxy "${sharedProxyUrl}"`;
 
-                    console.log("Executing yt-dlp fallback with no resolution cap");
+                    console.log("Executing yt-dlp fallback with maximum compatibility");
                     await executeWithRetry(
                         fallbackCmd,
                         maxRetries,
@@ -482,8 +482,44 @@ Actor.main(async () => {
                     );
                 }
 
+                // Final fallback: download full video and extract with ffmpeg if yt-dlp section download fails
                 if (!fs.existsSync(clipPath)) {
-                    throw new Error('yt-dlp did not produce the expected output file.');
+                    console.log("Section download failed, attempting full video download with ffmpeg extraction");
+                    const fullVideoPath = path.join(tempDir, `full_video_${clipIdentifier}.%(ext)s`);
+                    const fullVideoCommand = `yt-dlp --no-check-certificates --ignore-errors -f "best[ext=mp4]/best" --no-part --no-mtime -o "${fullVideoPath}" "${processedVideoUrl}"`;
+
+                    let fullVideoCmd = fullVideoCommand;
+                    if (cookieFilePath) fullVideoCmd += ` --cookies "${cookieFilePath}"`;
+                    if (sharedProxyUrl) fullVideoCmd += ` --proxy "${sharedProxyUrl}"`;
+
+                    try {
+                        await executeWithRetry(
+                            fullVideoCmd,
+                            2, // Fewer retries for full video
+                            180000, // 3 minutes for full video
+                            `${clip.name} (full video)`
+                        );
+
+                        // Find the downloaded file
+                        const downloadedFiles = fs.readdirSync(tempDir).filter(f => f.startsWith(`full_video_${clipIdentifier}`));
+                        if (downloadedFiles.length > 0) {
+                            const fullVideoFile = path.join(tempDir, downloadedFiles[0]);
+
+                            // Extract section with ffmpeg
+                            const ffmpegCommand = `ffmpeg -hide_banner -loglevel error -y -i "${fullVideoFile}" -ss ${startTime} -t ${duration} -c copy "${clipPath}"`;
+                            execSync(ffmpegCommand, { stdio: 'pipe', timeout: 60000 });
+
+                            // Clean up full video file
+                            fs.rmSync(fullVideoFile);
+                            console.log(`Successfully extracted ${duration}s clip using ffmpeg`);
+                        }
+                    } catch (ffmpegError) {
+                        console.warn(`Final fallback failed: ${ffmpegError.message}`);
+                    }
+                }
+
+                if (!fs.existsSync(clipPath)) {
+                    throw new Error('All download strategies failed to produce the expected output file.');
                 }
 
                 // --- Generate a thumbnail from the created clip ---
