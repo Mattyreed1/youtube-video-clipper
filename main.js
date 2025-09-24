@@ -205,7 +205,7 @@ async function chargeEvent(eventName) {
 // Function to detect actual video resolution using ffmpeg
 async function detectVideoResolution(filePath) {
     try {
-        const command = `ffmpeg -i "${filePath}" 2>&1 | grep -o -E '[0-9]{1,4}x[0-9]{1,4}' | head -1`;
+        const command = `ffmpeg -i "${filePath}" 2>&1 | grep -E 'Stream.*Video' | grep -o -E '[0-9]{2,4}x[0-9]{2,4}' | head -1`;
         const result = execSync(command, { encoding: 'utf8' }).trim();
         if (result && result.includes('x')) {
             const [width, height] = result.split('x').map(Number);
