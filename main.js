@@ -116,6 +116,78 @@ const timeToSeconds = (time) => {
 };
 
 /**
+ * Comprehensive input validation for clips and settings
+ * @param {Object} input - The actor input to validate
+ * @returns {Object} - Validation result with isValid and errors
+ */
+const validateInput = (input) => {
+    const errors = [];
+    const { videoUrl, clips, quality = '480p' } = input;
+
+    // Validate video URL
+    if (!videoUrl || typeof videoUrl !== 'string') {
+        errors.push('Video URL is required and must be a string');
+    }
+
+    // Validate clips array
+    if (!clips || !Array.isArray(clips)) {
+        errors.push('Clips must be provided as an array');
+    } else if (clips.length === 0) {
+        errors.push('At least one clip must be specified');
+    } else if (clips.length > 20) {
+        errors.push('Maximum 20 clips allowed per run for cost and performance reasons');
+    } else {
+        // Validate individual clips
+        clips.forEach((clip, index) => {
+            if (!clip.start || !clip.end) {
+                errors.push(`Clip ${index + 1}: Both start and end times are required`);
+                return;
+            }
+
+            const startTime = timeToSeconds(clip.start);
+            const endTime = timeToSeconds(clip.end);
+            const duration = endTime - startTime;
+
+            if (duration <= 0) {
+                errors.push(`Clip ${index + 1}: End time must be after start time`);
+            } else if (duration > 600) { // 10 minutes max
+                errors.push(`Clip ${index + 1}: Maximum clip duration is 10 minutes (600 seconds)`);
+            }
+
+            if (!clip.name || typeof clip.name !== 'string') {
+                errors.push(`Clip ${index + 1}: Name is required and must be a string`);
+            }
+        });
+    }
+
+    // Validate quality setting
+    const validQualities = ['360p', '480p', '720p', '1080p'];
+    if (!validQualities.includes(quality)) {
+        errors.push(`Quality must be one of: ${validQualities.join(', ')}`);
+    }
+
+    return {
+        isValid: errors.length === 0,
+        errors
+    };
+};
+
+/**
+ * Get quality-based pricing and format settings
+ * @param {string} quality - Quality setting (360p, 480p, 720p, 1080p)
+ * @returns {Object} - Quality configuration
+ */
+const getQualityConfig = (quality = '480p') => {
+    const configs = {
+        '360p': { height: 360, price: 0.07, eventName: 'clip_processed_360p' },
+        '480p': { height: 480, price: 0.09, eventName: 'clip_processed_480p' },
+        '720p': { height: 720, price: 0.19, eventName: 'clip_processed_720p' },
+        '1080p': { height: 1080, price: 0.29, eventName: 'clip_processed_1080p' }
+    };
+    return configs[quality] || configs['480p'];
+};
+
+/**
  * Helper function to charge events using Apify SDK
  * @param {string} eventName - The name of the event to charge for
  * @returns {Promise<boolean>} - Returns true if charge was successful
@@ -128,6 +200,87 @@ async function chargeEvent(eventName) {
     } catch (error) {
         console.error(`[ERROR] Failed to charge for event ${eventName}:`, error.message);
         return false;
+    }
+}
+
+/**
+ * Execute command with retry logic and exponential backoff
+ * @param {string} command - Command to execute
+ * @param {number} maxRetries - Maximum number of retry attempts
+ * @param {number} timeout - Timeout per attempt in milliseconds
+ * @param {string} clipName - Name of clip for logging
+ * @returns {Promise<boolean>} - Returns true if successful
+ */
+async function executeWithRetry(command, maxRetries = 3, timeout = 120000, clipName = '') {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            console.log(`[ATTEMPT ${attempt}/${maxRetries}] Executing command for ${clipName}`);
+            execSync(command, { stdio: "inherit", timeout });
+            console.log(`[SUCCESS] Command completed successfully for ${clipName}`);
+            return true;
+        } catch (error) {
+            const isLastAttempt = attempt === maxRetries;
+            const errorMsg = error.message || 'Unknown error';
+
+            if (isLastAttempt) {
+                console.error(`[FINAL FAILURE] All ${maxRetries} attempts failed for ${clipName}: ${errorMsg}`);
+                throw error;
+            }
+
+            // Exponential backoff: 5s, 15s, 30s
+            const delaySeconds = Math.min(5 * Math.pow(2, attempt - 1), 30);
+            console.warn(`[RETRY] Attempt ${attempt} failed for ${clipName}: ${errorMsg}`);
+            console.log(`[DELAY] Waiting ${delaySeconds} seconds before retry...`);
+
+            await new Promise(resolve => setTimeout(resolve, delaySeconds * 1000));
+        }
+    }
+    return false;
+}
+
+/**
+ * Save processing progress to Key-Value store for resume capability
+ * @param {Object} progress - Progress object to save
+ */
+async function saveProgress(progress) {
+    try {
+        const store = await Actor.openKeyValueStore();
+        await store.setValue('processing-progress', progress);
+        console.log(`[CHECKPOINT] Progress saved: ${progress.completedClips}/${progress.totalClips} clips processed`);
+    } catch (error) {
+        console.warn(`[WARN] Failed to save progress: ${error.message}`);
+    }
+}
+
+/**
+ * Load saved processing progress for resume capability
+ * @returns {Promise<Object|null>} - Saved progress or null if none exists
+ */
+async function loadProgress() {
+    try {
+        const store = await Actor.openKeyValueStore();
+        const progress = await store.getValue('processing-progress');
+        if (progress) {
+            console.log(`[RESUME] Found saved progress: ${progress.completedClips}/${progress.totalClips} clips completed`);
+            return progress;
+        }
+        return null;
+    } catch (error) {
+        console.warn(`[WARN] Failed to load progress: ${error.message}`);
+        return null;
+    }
+}
+
+/**
+ * Clear saved progress after successful completion
+ */
+async function clearProgress() {
+    try {
+        const store = await Actor.openKeyValueStore();
+        await store.setValue('processing-progress', null);
+        console.log('[CLEANUP] Processing progress cleared');
+    } catch (error) {
+        console.warn(`[WARN] Failed to clear progress: ${error.message}`);
     }
 }
 
@@ -161,13 +314,20 @@ Actor.main(async () => {
         useCookies,
         cookies,
         maxRetries = 3,
-        maxResolution = 480, // New optional input, defaults to 480p
+        quality = '480p', // Quality tier for pricing and format
+        maxResolution = 480, // Legacy support, override with quality setting
     } = input;
 
-    if (!videoUrl || !clips || !Array.isArray(clips) || clips.length === 0) {
-        await Actor.fail('Invalid input: "videoUrl" and a non-empty "clips" array are required.');
+    // Comprehensive input validation
+    const validation = validateInput(input);
+    if (!validation.isValid) {
+        await Actor.fail(`Input validation failed:\n${validation.errors.join('\n')}`);
         return;
     }
+
+    // Get quality configuration
+    const qualityConfig = getQualityConfig(quality);
+    console.log(`Processing clips at ${quality} quality (max height: ${qualityConfig.height}px, cost: $${qualityConfig.price} per clip)`);
 
     // Clean and validate YouTube URL format before processing
     const urlCleaning = cleanYouTubeUrl(videoUrl);
@@ -199,6 +359,19 @@ Actor.main(async () => {
 
     let processedCount = 0;
     let failedCount = 0;
+
+    // Check for saved progress to enable resume functionality
+    const savedProgress = await loadProgress();
+    let processedClipNames = new Set();
+
+    if (savedProgress && savedProgress.videoUrl === processedVideoUrl) {
+        processedCount = savedProgress.processedCount || 0;
+        failedCount = savedProgress.failedCount || 0;
+        processedClipNames = new Set(savedProgress.processedClipNames || []);
+        console.log(`[RESUME] Resuming from previous run with ${processedCount} completed and ${failedCount} failed clips`);
+    } else {
+        console.log('[NEW RUN] Starting fresh processing run');
+    }
 
     // --- Set up shared configurations ---
     let cookieFilePath = null;
@@ -234,9 +407,16 @@ Actor.main(async () => {
         // Process each clip
         for (const [index, clip] of clips.entries()) {
             const clipIdentifier = `clip_${(clip.name || index + 1).replace(/\s+/g, '_')}`;
+
+            // Skip already processed clips for resume functionality
+            if (processedClipNames.has(clip.name)) {
+                console.log(`[SKIP] Clip "${clip.name}" already processed in previous run`);
+                continue;
+            }
+
             let clipPath = null;
             let thumbnailPath = null;
-            console.log(`Processing ${clipIdentifier}...`);
+            console.log(`Processing ${clipIdentifier}... (${index + 1}/${clips.length})`);
 
             try {
                 // --- Create clip using yt-dlp section downloader (progressive format) ---
@@ -250,8 +430,8 @@ Actor.main(async () => {
 
                 console.log(`Creating clip: ${clip.name} from ${clip.start} to ${clip.end} (${duration}s)`);
 
-                // Choose resolution cap: default 480p, allow 720p if explicitly requested
-                const height = Number(maxResolution) === 720 ? 720 : 480;
+                // Use quality-based resolution selection
+                const height = qualityConfig.height;
                 const formatSelector = `best[height<=${height}]`;
 
                 // Prepare file paths
@@ -272,20 +452,34 @@ Actor.main(async () => {
 
                 console.log(`Executing yt-dlp for clip (capped at ${height}p): ${clip.name}`);
                 let downloadSucceeded = false;
+                const clipTimeout = 120000; // 2 minutes per clip - much more reasonable
+
                 try {
-                    execSync(ytDlpCommand, { stdio: "inherit", timeout: 1800000 }); // 30-min safety timeout
-                    downloadSucceeded = true;
+                    downloadSucceeded = await executeWithRetry(
+                        ytDlpCommand,
+                        maxRetries,
+                        clipTimeout,
+                        `${clip.name} (${quality})`
+                    );
                 } catch (err) {
-                    console.warn(`Resolution-capped download failed, retrying without cap → ${err.message}`);
+                    console.warn(`Resolution-capped download failed after ${maxRetries} attempts, trying without cap`);
+                    downloadSucceeded = false;
                 }
 
                 // Fallback: try again without the -f selector if the first attempt failed
                 if (!downloadSucceeded) {
-                    ytDlpCommand = `yt-dlp --quiet --download-sections "*${startTime}-${endTime}" --no-part --no-mtime --remux-video mp4 -o "${clipPath}" "${processedVideoUrl}"`;
-                    if (cookieFilePath) ytDlpCommand += ` --cookies "${cookieFilePath}"`;
-                    if (sharedProxyUrl) ytDlpCommand += ` --proxy "${sharedProxyUrl}"`;
+                    const fallbackCommand = `yt-dlp --quiet --download-sections "*${startTime}-${endTime}" --no-part --no-mtime --remux-video mp4 -o "${clipPath}" "${processedVideoUrl}"`;
+                    let fallbackCmd = fallbackCommand;
+                    if (cookieFilePath) fallbackCmd += ` --cookies "${cookieFilePath}"`;
+                    if (sharedProxyUrl) fallbackCmd += ` --proxy "${sharedProxyUrl}"`;
+
                     console.log("Executing yt-dlp fallback with no resolution cap");
-                    execSync(ytDlpCommand, { stdio: "inherit", timeout: 1800000 });
+                    await executeWithRetry(
+                        fallbackCmd,
+                        maxRetries,
+                        clipTimeout,
+                        `${clip.name} (fallback)`
+                    );
                 }
 
                 if (!fs.existsSync(clipPath)) {
@@ -307,8 +501,8 @@ Actor.main(async () => {
                 const clipUrl = await uploadToStorage(clipPath, 'video', clipIdentifier);
                 const thumbnailUrl = thumbnailPath ? await uploadToStorage(thumbnailPath, 'image', clipIdentifier) : null;
 
-                // Charge for clip_processed event only after successful processing
-                const clipCharged = await chargeEvent('clip_processed');
+                // Charge for quality-specific clip processing event
+                const clipCharged = await chargeEvent(qualityConfig.eventName);
 
                 const clipData = {
                     name: clip.name || `clip_${index + 1}`,
@@ -319,16 +513,31 @@ Actor.main(async () => {
                     thumbnailUrl,
                     duration,
                     size: fs.statSync(clipPath).size,
+                    quality: quality,
+                    maxHeight: qualityConfig.height,
                     outputFormat: 'mp4',
                     clipIndex: index + 1,
                     videoUrl: processedVideoUrl,
                     processingTime: new Date().toISOString(),
                     failed: false,
-                    charged: clipCharged, // Track if charging was successful
+                    charged: clipCharged,
+                    eventCharged: qualityConfig.eventName
                 };
 
                 await Actor.pushData(clipData);
                 processedCount++;
+                processedClipNames.add(clip.name);
+
+                // Save progress after each successful clip
+                await saveProgress({
+                    videoUrl: processedVideoUrl,
+                    totalClips: clips.length,
+                    completedClips: processedCount + failedCount,
+                    processedCount,
+                    failedCount,
+                    processedClipNames: Array.from(processedClipNames),
+                    lastProcessedAt: new Date().toISOString()
+                });
             } catch (error) {
                 console.error(`Failed to process clip ${clip.name}:`, error);
                 await Actor.pushData({
@@ -344,6 +553,18 @@ Actor.main(async () => {
                     charged: false, // Failed clips are not charged
                 });
                 failedCount++;
+                processedClipNames.add(clip.name); // Mark as attempted to avoid reprocessing
+
+                // Save progress after failure too
+                await saveProgress({
+                    videoUrl: processedVideoUrl,
+                    totalClips: clips.length,
+                    completedClips: processedCount + failedCount,
+                    processedCount,
+                    failedCount,
+                    processedClipNames: Array.from(processedClipNames),
+                    lastProcessedAt: new Date().toISOString()
+                });
             } finally {
                 if (clipPath && fs.existsSync(clipPath)) fs.rmSync(clipPath);
                 if (thumbnailPath && fs.existsSync(thumbnailPath)) fs.rmSync(thumbnailPath);
@@ -367,6 +588,9 @@ Actor.main(async () => {
         }
     }
 
+    // Clear progress on successful completion
+    await clearProgress();
+
     // Push a final summary object
     const summary = {
         totalClips: clips.length,
@@ -374,6 +598,8 @@ Actor.main(async () => {
         failedCount,
         runStartCharged,
         runFinished: new Date().toISOString(),
+        qualityUsed: quality,
+        resumedFromPrevious: savedProgress !== null
     };
     await Actor.pushData({ '#summary': true, ...summary });
     console.log('--- Run Summary ---');

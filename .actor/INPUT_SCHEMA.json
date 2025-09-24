@@ -14,13 +14,18 @@
     "clips": {
       "title": "Clips to Extract",
       "type": "array",
-      "description": "A list of clips to extract from the video, in JSON format.",
+      "description": "A list of clips to extract from the video, in JSON format. Maximum 20 clips per run, each clip maximum 10 minutes duration.",
       "editor": "json",
       "prefill": [
         {
-          "name": "test_clip",
+          "name": "intro_clip",
           "start": "00:00:05",
           "end": "00:00:15"
+        },
+        {
+          "name": "highlight_moment",
+          "start": "00:01:30",
+          "end": "00:01:45"
         }
       ]
     },
@@ -32,12 +37,20 @@
       "minimum": 1,
       "maximum": 10
     },
-    "maxResolution": {
-      "title": "Maximum Video Resolution",
+    "quality": {
+      "title": "Video Quality & Pricing Tier",
       "type": "string",
-      "description": "Maximum resolution for downloaded video clips. Lower resolution reduces costs and data usage.",
+      "description": "Choose video quality and pricing tier. Higher quality costs more per clip but provides better video resolution.",
+      "enum": ["360p", "480p", "720p", "1080p"],
+      "enumTitles": ["360p - $0.07 per clip (Basic)", "480p - $0.09 per clip (Recommended)", "720p - $0.19 per clip (High Quality)", "1080p - $0.29 per clip (Premium)"],
+      "default": "480p"
+    },
+    "maxResolution": {
+      "title": "Legacy Maximum Resolution",
+      "type": "string",
+      "description": "Legacy parameter for backward compatibility. Use 'quality' parameter instead.",
       "enum": ["480", "720"],
-      "enumTitles": ["480p (Recommended)", "720p (Higher Quality, Slower, More Expensive)"],
+      "enumTitles": ["480p", "720p"],
       "default": "480"
     },
     "useCookies": {

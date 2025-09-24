@@ -88,18 +88,37 @@
 						"type": "boolean",
 						"title": "Charged",
 						"description": "Whether the clip was successfully charged"
+					},
+					"quality": {
+						"type": "string",
+						"title": "Quality",
+						"description": "Video quality tier used for processing"
+					},
+					"maxHeight": {
+						"type": "number",
+						"title": "Max Height",
+						"description": "Maximum height in pixels for the quality tier"
+					},
+					"eventCharged": {
+						"type": "string",
+						"title": "Event Charged",
+						"description": "The specific charging event that was used"
 					}
 				}
 			},
 			"views": {
 				"overview": {
 					"title": "All Clips",
-					"description": "Complete overview of all processed clips"
+					"description": "Complete overview of all processed clips",
+					"transformation": {
+						"fields": ["name", "description", "startTime", "endTime", "duration", "url", "thumbnailUrl", "quality", "maxHeight", "clipIndex", "processingTime", "failed", "charged", "eventCharged"]
+					}
 				},
 				"successful": {
 					"title": "Successful Clips",
 					"description": "Only successfully processed clips (billable items)",
 					"transformation": {
+						"fields": ["name", "description", "startTime", "endTime", "duration", "url", "thumbnailUrl", "quality", "maxHeight", "clipIndex", "processingTime", "eventCharged"],
 						"filters": [
 							["failed", "=", false],
 							["#summary", "!=", true]

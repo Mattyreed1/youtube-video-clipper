@@ -75,11 +75,12 @@ The input requires a YouTube video URL and an array of clips with timestamps:
 
 **Input Parameters:**
 - **videoUrl**: The YouTube video URL to process
-- **clips**: Array of clips with name, start time, and end time
+- **clips**: Array of clips with name, start time, and end time (max 20 clips, 10 min each)
+- **quality**: Video quality tier (360p/480p/720p/1080p) - affects pricing
 - **proxy**: Optional proxy configuration for blocked regions
 - **useCookies**: Optional boolean to enable cookie usage (required if using cookies)
 - **cookies**: Optional YouTube cookies for private/restricted videos
-- **maxRetries**: Number of retry attempts (default: 3)
+- **maxRetries**: Number of retry attempts with exponential backoff (default: 3)
 
 Go to the input tab for a full explanation of the JSON input format.
 
@@ -98,12 +99,14 @@ Each processed clip returns detailed information including direct download URLs:
   "duration": 10,
   "size": 2457600,
   "quality": "720p",
+  "maxHeight": 720,
   "outputFormat": "mp4",
   "clipIndex": 1,
   "videoUrl": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
   "processingTime": "2024-01-15T10:30:45.123Z",
   "failed": false,
-  "charged": true
+  "charged": true,
+  "eventCharged": "clip_processed_720p"
 }
 ```
 
@@ -123,17 +126,26 @@ You can also use webhooks to carry out actions whenever clips are processed, suc
 
 ## Advanced Features
 
+### Quality-Based Pricing
+Choose from 4 quality tiers (360p to 1080p) with transparent per-clip pricing.
+
+### Resume & Recovery System
+Automatically resume interrupted runs without losing progress or reprocessing completed clips.
+
+### Smart Retry Logic
+Built-in exponential backoff retry system handles temporary YouTube blocks and network issues.
+
 ### Proxy Support
 Handle geo-blocked or rate-limited videos with residential proxy support.
 
 ### Cookie Authentication
 Access private, age-restricted, or member-only videos using browser cookies.
 
-### Automatic Retries
-Built-in retry logic handles temporary YouTube blocks and network issues.
+### Input Validation & Limits
+Comprehensive validation with safety limits: max 20 clips per run, 10 minutes per clip.
 
-### High-Quality Output
-Supports up to 720p video quality with stream copying (no re-encoding) for fast processing.
+### Real-time Processing
+Clips are processed and uploaded individually as they complete, not in batches.
 
 ## Use Cases
 
@@ -145,17 +157,23 @@ Supports up to 720p video quality with stream copying (no re-encoding) for fast 
 
 ## 💰 Pricing
 
-YouTube Video Clipper uses a **Pay Per Event** pricing model for transparent and fair billing:
+YouTube Video Clipper uses a **Pay Per Event** pricing model with **quality-based tiers** for transparent and fair billing:
 
 ### Event-based Pricing
 - **Run Started**: $0.05 per run - Covers setup, proxy initialization, and infrastructure overhead
-- **Clip Processed**: $0.09 per successfully processed clip - Only charged for clips that are successfully created
+- **Clip Processed**: Variable cost based on quality tier selected
+
+### Quality Tiers & Pricing
+- **360p (Basic)**: $0.07 per clip - Fast processing, smaller files
+- **480p (Recommended)**: $0.09 per clip - Best balance of quality and cost
+- **720p (High Quality)**: $0.19 per clip - HD quality for professional use
+- **1080p (Premium)**: $0.29 per clip - Full HD, highest quality available
 
 ### Pricing Examples
-- **1 clip**: $0.05 (run) + $0.09 (clip) = **$0.14 total**
-- **5 clips**: $0.05 (run) + $0.45 (5 clips) = **$0.50 total**
-- **10 clips**: $0.05 (run) + $0.90 (10 clips) = **$0.95 total**
-- **25 clips**: $0.05 (run) + $2.25 (25 clips) = **$2.30 total**
+- **1 clip (480p)**: $0.05 (run) + $0.09 (clip) = **$0.14 total**
+- **5 clips (480p)**: $0.05 (run) + $0.45 (5 clips) = **$0.50 total**
+- **10 clips (720p)**: $0.05 (run) + $1.90 (10 clips) = **$1.95 total**
+- **20 clips (mixed)**: $0.05 (run) + variable per quality = **$1.45-$5.85 total**
 
 ### Key Benefits
 ✅ **No platform usage charges** - You don't pay for compute units, storage, or proxy usage  
@@ -165,9 +183,10 @@ YouTube Video Clipper uses a **Pay Per Event** pricing model for transparent and
 
 ### Free Credits
 With the **Apify Free plan's $5 monthly credits**, you can process:
-- Up to **35 single clips** per month, or
-- Up to **9 runs with 5 clips each**, or  
-- Up to **5 runs with 10 clips each**
+- Up to **71 clips at 360p** ($0.07 each) per month, or
+- Up to **55 clips at 480p** ($0.09 each) per month, or
+- Up to **26 clips at 720p** ($0.19 each) per month, or
+- Up to **17 clips at 1080p** ($0.29 each) per month
 
 **No setup fees** - Start using immediately with your free credits!
 
@@ -260,10 +279,10 @@ See the `/examples` folder for complete webhook handler implementations:
 ## ❓ FAQ
 
 ### How much does it cost to use YouTube Video Clipper?
-YouTube Video Clipper uses Pay Per Event pricing: $0.05 per run plus $0.09 per successfully processed clip. With the Apify Free plan's $5 monthly credits, you can process up to 35 single clips or multiple runs with several clips each at no cost.
+YouTube Video Clipper uses Pay Per Event pricing with quality-based tiers: $0.05 per run plus $0.07-$0.29 per clip depending on quality (360p/480p/720p/1080p). With the Apify Free plan's $5 monthly credits, you can process 17-71 clips per month depending on quality tier.
 
 ### What video qualities are supported?
-The tool supports up to 720p video quality, automatically selecting the best available quality or falling back to 480p and lower resolutions if needed.
+Four quality tiers: 360p ($0.07), 480p ($0.09), 720p ($0.19), and 1080p ($0.29) per clip. Choose based on your needs and budget - higher quality costs more but provides better resolution.
 
 ### Can I download private or age-restricted videos?
 Yes, by providing YouTube cookies from a logged-in browser session, you can access private, age-restricted, or member-only content.
@@ -278,10 +297,19 @@ There's no strict limit on clip duration - you can extract clips from a few seco
 All clips are output in MP4 format using stream copying (no re-encoding) to preserve original quality and ensure fast processing.
 
 ### Am I charged if a clip fails to process?
-No! You're only charged the $0.09 "Clip Processed" event for clips that are successfully created. Failed clips don't incur any charges, though you'll still pay the $0.05 "Run Started" fee per execution.
+No! You're only charged the quality-based "Clip Processed" event ($0.07-$0.29) for clips that are successfully created. Failed clips don't incur any charges, though you'll still pay the $0.05 "Run Started" fee per execution.
 
 ### How does Pay Per Event pricing work?
-Unlike traditional compute-based pricing, Pay Per Event means you pay for specific actions: starting a run ($0.05) and successfully processing each clip ($0.09). You don't pay for platform usage like compute units, storage operations, or proxy bandwidth.
+Unlike traditional compute-based pricing, Pay Per Event means you pay for specific actions: starting a run ($0.05) and successfully processing each clip ($0.07-$0.29 based on quality). You don't pay for platform usage like compute units, storage operations, or proxy bandwidth.
+
+### What happens if my run gets interrupted?
+The actor automatically saves progress and can resume from where it left off. Already processed clips won't be reprocessed, saving you time and money.
+
+### How many clips can I process at once?
+Maximum 20 clips per run, with each clip limited to 10 minutes duration. This ensures optimal performance and cost control.
+
+### How long do clips take to process?
+Typically 30-90 seconds per clip depending on duration and quality. The actor uses smart retry logic with 2-minute timeout per clip to prevent endless processing.
 
 ## Your feedback
 
