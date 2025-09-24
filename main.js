@@ -438,7 +438,7 @@ Actor.main(async () => {
                 clipPath = path.join(tempDir, `${clipIdentifier}.mp4`);
 
                 // First attempt: download with resolution cap and better options
-                let ytDlpCommand = `yt-dlp --no-check-certificates --ignore-errors --extract-flat false -f "${formatSelector}" --download-sections "*${startTime}-${endTime}" --no-part --no-mtime --remux-video mp4 -o "${clipPath}" "${processedVideoUrl}"`;
+                let ytDlpCommand = `yt-dlp --no-check-certificates --ignore-errors --no-playlist -f "${formatSelector}" --download-sections "*${startTime}-${endTime}" --no-part --no-mtime --remux-video mp4 -o "${clipPath}" "${processedVideoUrl}"`;
 
                 // Append cookies if provided
                 if (cookieFilePath) {
@@ -468,7 +468,7 @@ Actor.main(async () => {
 
                 // Fallback: try with most compatible settings
                 if (!downloadSucceeded) {
-                    const fallbackCommand = `yt-dlp --no-check-certificates --ignore-errors --extract-flat false -f "best/worst" --download-sections "*${startTime}-${endTime}" --no-part --no-mtime --remux-video mp4 -o "${clipPath}" "${processedVideoUrl}"`;
+                    const fallbackCommand = `yt-dlp --no-check-certificates --ignore-errors --no-playlist -f "best/worst" --download-sections "*${startTime}-${endTime}" --no-part --no-mtime --remux-video mp4 -o "${clipPath}" "${processedVideoUrl}"`;
                     let fallbackCmd = fallbackCommand;
                     if (cookieFilePath) fallbackCmd += ` --cookies "${cookieFilePath}"`;
                     if (sharedProxyUrl) fallbackCmd += ` --proxy "${sharedProxyUrl}"`;
