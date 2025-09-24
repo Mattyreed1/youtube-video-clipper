@@ -157,23 +157,24 @@ Clips are processed and uploaded individually as they complete, not in batches.
 
 ## 💰 Pricing
 
-YouTube Video Clipper uses a **Pay Per Event** pricing model with **quality-based tiers** for transparent and fair billing:
+YouTube Video Clipper uses a **Pay Per Event** pricing model for simple and transparent billing:
 
 ### Event-based Pricing
 - **Run Started**: $0.05 per run - Covers setup, proxy initialization, and infrastructure overhead
-- **Clip Processed**: Variable cost based on quality tier selected
+- **Clip Processed**: $0.09 per clip - Fixed cost regardless of quality selected
 
-### Quality Tiers & Pricing
-- **360p (Basic)**: $0.07 per clip - Fast processing, smaller files
-- **480p (Recommended)**: $0.09 per clip - Best balance of quality and cost
-- **720p (High Quality)**: $0.19 per clip - HD quality for professional use
-- **1080p (Premium)**: $0.29 per clip - Full HD, highest quality available
+### Quality Options & Delivery
+- **360p (Basic)**: Best for social media, smaller files
+- **480p (Recommended)**: Balanced quality and file size
+- **720p (High Quality)**: HD quality for professional use
+
+**Note**: All clips cost $0.09 regardless of quality selected. If the requested quality isn't available from the source video, the highest available quality is delivered with a notification.
 
 ### Pricing Examples
-- **1 clip (480p)**: $0.05 (run) + $0.09 (clip) = **$0.14 total**
-- **5 clips (480p)**: $0.05 (run) + $0.45 (5 clips) = **$0.50 total**
-- **10 clips (720p)**: $0.05 (run) + $1.90 (10 clips) = **$1.95 total**
-- **20 clips (mixed)**: $0.05 (run) + variable per quality = **$1.45-$5.85 total**
+- **1 clip**: $0.05 (run) + $0.09 (clip) = **$0.14 total**
+- **5 clips**: $0.05 (run) + $0.45 (5 clips) = **$0.50 total**
+- **10 clips**: $0.05 (run) + $0.90 (10 clips) = **$0.95 total**
+- **20 clips**: $0.05 (run) + $1.80 (20 clips) = **$1.85 total**
 
 ### Key Benefits
 ✅ **No platform usage charges** - You don't pay for compute units, storage, or proxy usage  
@@ -183,12 +184,29 @@ YouTube Video Clipper uses a **Pay Per Event** pricing model with **quality-base
 
 ### Free Credits
 With the **Apify Free plan's $5 monthly credits**, you can process:
-- Up to **71 clips at 360p** ($0.07 each) per month, or
-- Up to **55 clips at 480p** ($0.09 each) per month, or
-- Up to **26 clips at 720p** ($0.19 each) per month, or
-- Up to **17 clips at 1080p** ($0.29 each) per month
+- Up to **55 clips** ($0.09 each) per month
+- Multiple runs with combined clips (remember the $0.05 run fee)
 
 **No setup fees** - Start using immediately with your free credits!
+
+## 🎯 Quality Delivery & Notifications
+
+### How Quality Selection Works
+- **Request any quality**: Choose from 360p, 480p, or 720p based on your needs
+- **Automatic fallback**: If your requested quality isn't available, the highest available quality is delivered
+- **Clear notifications**: You'll see warnings in logs and output when quality differs from requested
+- **Fixed pricing**: All clips cost $0.09 regardless of final quality delivered
+
+### Quality Notifications
+When the delivered quality differs from requested, you'll see:
+- **Console warnings**: `⚠️ QUALITY NOTICE: Requested 720p but video source only available at 480p. You are still charged for 720p tier.`
+- **Dataset fields**: `actualResolution`, `actualHeight`, and `qualityWarning` show what was delivered
+- **Transparency**: Full visibility into quality fallbacks without surprises
+
+### Example Quality Scenarios
+- **720p requested, 720p available**: Delivered at 720p, no warnings
+- **720p requested, 480p max available**: Delivered at 480p with quality notice
+- **480p requested, 1080p available**: Delivered at 480p (as requested)
 
 ## 🔧 API Access
 
@@ -279,10 +297,10 @@ See the `/examples` folder for complete webhook handler implementations:
 ## ❓ FAQ
 
 ### How much does it cost to use YouTube Video Clipper?
-YouTube Video Clipper uses Pay Per Event pricing with quality-based tiers: $0.05 per run plus $0.07-$0.29 per clip depending on quality (360p/480p/720p/1080p). With the Apify Free plan's $5 monthly credits, you can process 17-71 clips per month depending on quality tier.
+YouTube Video Clipper uses Pay Per Event pricing: $0.05 per run plus $0.09 per clip regardless of quality selected. With the Apify Free plan's $5 monthly credits, you can process up to 55 clips per month.
 
 ### What video qualities are supported?
-Four quality tiers: 360p ($0.07), 480p ($0.09), 720p ($0.19), and 1080p ($0.29) per clip. Choose based on your needs and budget - higher quality costs more but provides better resolution.
+Three quality options: 360p (Basic), 480p (Recommended), and 720p (High Quality). All clips cost $0.09 regardless of quality selected. If your requested quality isn't available from the source video, the highest available quality is delivered with a notification.
 
 ### Can I download private or age-restricted videos?
 Yes, by providing YouTube cookies from a logged-in browser session, you can access private, age-restricted, or member-only content.
@@ -297,10 +315,10 @@ There's no strict limit on clip duration - you can extract clips from a few seco
 All clips are output in MP4 format using stream copying (no re-encoding) to preserve original quality and ensure fast processing.
 
 ### Am I charged if a clip fails to process?
-No! You're only charged the quality-based "Clip Processed" event ($0.07-$0.29) for clips that are successfully created. Failed clips don't incur any charges, though you'll still pay the $0.05 "Run Started" fee per execution.
+No! You're only charged the "Clip Processed" event ($0.09) for clips that are successfully created. Failed clips don't incur any charges, though you'll still pay the $0.05 "Run Started" fee per execution.
 
 ### How does Pay Per Event pricing work?
-Unlike traditional compute-based pricing, Pay Per Event means you pay for specific actions: starting a run ($0.05) and successfully processing each clip ($0.07-$0.29 based on quality). You don't pay for platform usage like compute units, storage operations, or proxy bandwidth.
+Unlike traditional compute-based pricing, Pay Per Event means you pay for specific actions: starting a run ($0.05) and successfully processing each clip ($0.09). You don't pay for platform usage like compute units, storage operations, or proxy bandwidth.
 
 ### What happens if my run gets interrupted?
 The actor automatically saves progress and can resume from where it left off. Already processed clips won't be reprocessed, saving you time and money.

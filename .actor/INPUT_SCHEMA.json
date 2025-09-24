@@ -40,9 +40,9 @@
     "quality": {
       "title": "Video Quality & Pricing Tier",
       "type": "string",
-      "description": "Choose video quality and pricing tier. Higher quality costs more per clip but provides better video resolution.",
-      "enum": ["360p", "480p", "720p", "1080p"],
-      "enumTitles": ["360p - $0.07 per clip (Basic)", "480p - $0.09 per clip (Recommended)", "720p - $0.19 per clip (High Quality)", "1080p - $0.29 per clip (Premium)"],
+      "description": "Choose video quality tier. All clips cost $0.09 regardless of quality selected.",
+      "enum": ["360p", "480p", "720p"],
+      "enumTitles": ["360p - $0.09 per clip (Basic)", "480p - $0.09 per clip (Recommended)", "720p - $0.09 per clip (High Quality)"],
       "default": "480p"
     },
     "maxResolution": {

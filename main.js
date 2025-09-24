@@ -173,16 +173,15 @@ const validateInput = (input) => {
 };
 
 /**
- * Get quality-based pricing and format settings
- * @param {string} quality - Quality setting (360p, 480p, 720p, 1080p)
+ * Get quality-based format settings (all clips charge $0.09)
+ * @param {string} quality - Quality setting (360p, 480p, 720p)
  * @returns {Object} - Quality configuration
  */
 const getQualityConfig = (quality = '480p') => {
     const configs = {
-        '360p': { height: 360, price: 0.07, eventName: 'clip_processed_360p' },
-        '480p': { height: 480, price: 0.09, eventName: 'clip_processed_480p' },
-        '720p': { height: 720, price: 0.19, eventName: 'clip_processed_720p' },
-        '1080p': { height: 1080, price: 0.29, eventName: 'clip_processed_1080p' }
+        '360p': { height: 360, price: 0.09, eventName: 'clip_processed' },
+        '480p': { height: 480, price: 0.09, eventName: 'clip_processed' },
+        '720p': { height: 720, price: 0.09, eventName: 'clip_processed' }
     };
     return configs[quality] || configs['480p'];
 };
@@ -200,6 +199,22 @@ async function chargeEvent(eventName) {
     } catch (error) {
         console.error(`[ERROR] Failed to charge for event ${eventName}:`, error.message);
         return false;
+    }
+}
+
+// Function to detect actual video resolution using ffmpeg
+async function detectVideoResolution(filePath) {
+    try {
+        const command = `ffmpeg -i "${filePath}" 2>&1 | grep -o -E '[0-9]{1,4}x[0-9]{1,4}' | head -1`;
+        const result = execSync(command, { encoding: 'utf8' }).trim();
+        if (result && result.includes('x')) {
+            const [width, height] = result.split('x').map(Number);
+            return { width, height, resolution: `${height}p` };
+        }
+        return null;
+    } catch (error) {
+        console.warn(`[WARNING] Could not detect video resolution: ${error.message}`);
+        return null;
     }
 }
 
@@ -522,6 +537,16 @@ Actor.main(async () => {
                     throw new Error('All download strategies failed to produce the expected output file.');
                 }
 
+                // --- Check actual resolution of created clip ---
+                const actualResolution = await detectVideoResolution(clipPath);
+                const requestedHeight = qualityConfig.height;
+                let qualityWarning = '';
+
+                if (actualResolution && actualResolution.height < requestedHeight) {
+                    qualityWarning = `⚠️  QUALITY NOTICE: Requested ${quality} (${requestedHeight}p) but video source only available at ${actualResolution.resolution}. You are still charged for ${quality} tier.`;
+                    console.log(`[QUALITY NOTICE] ${clip.name}: ${qualityWarning}`);
+                }
+
                 // --- Generate a thumbnail from the created clip ---
                 thumbnailPath = path.join(tempDir, `${clipIdentifier}.jpg`);
                 const ffmpegBase = `ffmpeg -hide_banner -loglevel error -y`;
@@ -551,6 +576,9 @@ Actor.main(async () => {
                     size: fs.statSync(clipPath).size,
                     quality: quality,
                     maxHeight: qualityConfig.height,
+                    actualResolution: actualResolution ? actualResolution.resolution : null,
+                    actualHeight: actualResolution ? actualResolution.height : null,
+                    qualityWarning: qualityWarning || null,
                     outputFormat: 'mp4',
                     clipIndex: index + 1,
                     videoUrl: processedVideoUrl,

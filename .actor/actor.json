@@ -103,6 +103,21 @@
 						"type": "string",
 						"title": "Event Charged",
 						"description": "The specific charging event that was used"
+					},
+					"actualResolution": {
+						"type": "string",
+						"title": "Actual Resolution",
+						"description": "The actual resolution delivered (e.g. '480p')"
+					},
+					"actualHeight": {
+						"type": "number",
+						"title": "Actual Height",
+						"description": "The actual height in pixels delivered"
+					},
+					"qualityWarning": {
+						"type": "string",
+						"title": "Quality Warning",
+						"description": "Warning message if requested quality was not available"
 					}
 				}
 			},
@@ -111,14 +126,14 @@
 					"title": "All Clips",
 					"description": "Complete overview of all processed clips",
 					"transformation": {
-						"fields": ["name", "description", "startTime", "endTime", "duration", "url", "thumbnailUrl", "quality", "maxHeight", "clipIndex", "processingTime", "failed", "charged", "eventCharged"]
+						"fields": ["name", "description", "startTime", "endTime", "duration", "url", "thumbnailUrl", "quality", "maxHeight", "actualResolution", "actualHeight", "qualityWarning", "clipIndex", "processingTime", "failed", "charged", "eventCharged"]
 					}
 				},
 				"successful": {
 					"title": "Successful Clips",
 					"description": "Only successfully processed clips (billable items)",
 					"transformation": {
-						"fields": ["name", "description", "startTime", "endTime", "duration", "url", "thumbnailUrl", "quality", "maxHeight", "clipIndex", "processingTime", "eventCharged"],
+						"fields": ["name", "description", "startTime", "endTime", "duration", "url", "thumbnailUrl", "quality", "maxHeight", "actualResolution", "actualHeight", "qualityWarning", "clipIndex", "processingTime", "eventCharged"],
 						"filters": [
 							["failed", "=", false],
 							["#summary", "!=", true]
