@@ -14,15 +14,15 @@
 			"fields": {
 				"type": "object",
 				"properties": {
-					"tweetId": {
+					"name": {
 						"type": "string",
-						"title": "Tweet ID",
-						"description": "Unique identifier for the tweet/clip"
+						"title": "Clip Name",
+						"description": "Name of the video clip"
 					},
-					"tweetText": {
+					"description": {
 						"type": "string",
-						"title": "Tweet Text",
-						"description": "Text content associated with the clip"
+						"title": "Description",
+						"description": "Description of the clip content"
 					},
 					"startTime": {
 						"type": "string",
@@ -31,18 +31,13 @@
 					},
 					"endTime": {
 						"type": "string",
-						"title": "End Time", 
+						"title": "End Time",
 						"description": "Clip end time in HH:MM:SS format"
 					},
 					"duration": {
 						"type": "number",
 						"title": "Duration",
 						"description": "Clip duration in seconds"
-					},
-					"filename": {
-						"type": "string",
-						"title": "Filename",
-						"description": "Generated filename for the clip"
 					},
 					"url": {
 						"type": "string",
@@ -55,7 +50,7 @@
 						"description": "File size in bytes"
 					},
 					"videoUrl": {
-						"type": "string", 
+						"type": "string",
 						"title": "Source Video",
 						"description": "Original YouTube video URL"
 					},
@@ -68,11 +63,6 @@
 						"type": "string",
 						"title": "Thumbnail",
 						"description": "URL to video thumbnail"
-					},
-					"quality": {
-						"type": "string",
-						"title": "Quality",
-						"description": "Video quality setting"
 					},
 					"outputFormat": {
 						"type": "string",
@@ -94,144 +84,26 @@
 						"title": "Failed",
 						"description": "Whether the clip processing failed"
 					},
-					"summaryRecord": {
+					"charged": {
 						"type": "boolean",
-						"title": "Summary Record",
-						"description": "Whether this is a summary record (not billable)"
+						"title": "Charged",
+						"description": "Whether the clip was successfully charged"
 					}
 				}
 			},
 			"views": {
 				"overview": {
 					"title": "All Clips",
-					"description": "Complete overview of all processed clips",
-					"transformation": {
-						"fields": [
-							"tweetId",
-							"tweetText", 
-							"url",
-							"startTime",
-							"endTime", 
-							"duration",
-							"size",
-							"thumbnailUrl",
-							"quality",
-							"outputFormat",
-							"clipIndex",
-							"videoUrl",
-							"processingTime"
-						]
-					},
-					"display": {
-						"component": "table",
-						"properties": {
-							"tweetId": {
-								"label": "Tweet ID",
-								"format": "text"
-							},
-							"tweetText": {
-								"label": "Tweet Text",
-								"format": "text"
-							},
-							"url": {
-								"label": "Download",
-								"format": "link"
-							},
-							"startTime": {
-								"label": "Start",
-								"format": "text"
-							},
-							"endTime": {
-								"label": "End", 
-								"format": "text"
-							},
-							"duration": {
-								"label": "Duration (s)",
-								"format": "number"
-							},
-							"size": {
-								"label": "Size (bytes)",
-								"format": "number"
-							},
-							"thumbnailUrl": {
-								"label": "Thumbnail",
-								"format": "image"
-							},
-							"quality": {
-								"label": "Quality",
-								"format": "text"
-							},
-							"outputFormat": {
-								"label": "Format",
-								"format": "text"
-							},
-							"clipIndex": {
-								"label": "Clip #",
-								"format": "number"
-							},
-							"videoUrl": {
-								"label": "Source Video",
-								"format": "link"
-							},
-							"processingTime": {
-								"label": "Processed At",
-								"format": "date"
-							}
-						}
-					}
+					"description": "Complete overview of all processed clips"
 				},
 				"successful": {
 					"title": "Successful Clips",
 					"description": "Only successfully processed clips (billable items)",
 					"transformation": {
-						"fields": [
-							"tweetId",
-							"tweetText",
-							"url", 
-							"startTime",
-							"endTime",
-							"duration",
-							"size",
-							"thumbnailUrl"
-						],
-						"omit": ["failed", "error", "summaryRecord"]
-					},
-					"display": {
-						"component": "table",
-						"properties": {
-							"tweetId": {
-								"label": "Tweet ID",
-								"format": "text"
-							},
-							"tweetText": {
-								"label": "Tweet Text", 
-								"format": "text"
-							},
-							"url": {
-								"label": "Download",
-								"format": "link"
-							},
-							"startTime": {
-								"label": "Start",
-								"format": "text"
-							},
-							"endTime": {
-								"label": "End",
-								"format": "text"
-							},
-							"duration": {
-								"label": "Duration (s)",
-								"format": "number"
-							},
-							"size": {
-								"label": "Size (bytes)",
-								"format": "number"
-							},
-							"thumbnailUrl": {
-								"label": "Thumbnail",
-								"format": "image"
-							}
-						}
+						"filters": [
+							["failed", "=", false],
+							["#summary", "!=", true]
+						]
 					}
 				}
 			}

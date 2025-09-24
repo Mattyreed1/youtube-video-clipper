@@ -4,7 +4,6 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import crypto from "crypto";
-import axios from "axios";
 
 /**
  * Helper function to clean YouTube video URL by removing problematic parameters.
@@ -117,50 +116,17 @@ const timeToSeconds = (time) => {
 };
 
 /**
- * Helper function to charge events using Apify's PPE charging API
- * @param {string} eventType - The type of event to charge for
- * @param {string} idempotencyKey - Unique key to prevent double charging
+ * Helper function to charge events using Apify SDK
+ * @param {string} eventName - The name of the event to charge for
  * @returns {Promise<boolean>} - Returns true if charge was successful
  */
-async function chargeEvent(eventType, idempotencyKey) {
+async function chargeEvent(eventName) {
     try {
-        const apiToken = process.env.APIFY_TOKEN;
-        const actorRunId = process.env.APIFY_ACTOR_RUN_ID;
-        
-        if (!apiToken || !actorRunId) {
-            console.warn(`[WARN] Missing API token or run ID, skipping charge for ${eventType}`);
-            return false;
-        }
-
-        const response = await axios.post(
-            `https://api.apify.com/v2/actor-runs/${actorRunId}/charge-event`,
-            {
-                eventType,
-                idempotencyKey
-            },
-            {
-                headers: {
-                    'Authorization': `Bearer ${apiToken}`,
-                    'Content-Type': 'application/json'
-                },
-                timeout: 10000
-            }
-        );
-
-        if (response.status === 200 || response.status === 201) {
-            console.log(`[CHARGE] Successfully charged for event: ${eventType}`);
-            return true;
-        } else {
-            console.warn(`[WARN] Unexpected response for charge ${eventType}: ${response.status}`);
-            return false;
-        }
+        await Actor.charge({ eventName });
+        console.log(`[CHARGE] Successfully charged for event: ${eventName}`);
+        return true;
     } catch (error) {
-        if (error.response?.status === 409) {
-            console.log(`[CHARGE] Event ${eventType} already charged (duplicate), skipping`);
-            return true; // Considered successful since it was already charged
-        }
-        
-        console.error(`[ERROR] Failed to charge for event ${eventType}:`, error.message);
+        console.error(`[ERROR] Failed to charge for event ${eventName}:`, error.message);
         return false;
     }
 }
@@ -220,9 +186,8 @@ Actor.main(async () => {
     }
 
     // Charge for run_started event immediately
-    const runStartedKey = `run_started_${process.env.APIFY_ACTOR_RUN_ID || Date.now()}`;
-    const runStartCharged = await chargeEvent('run_started', runStartedKey);
-    
+    const runStartCharged = await chargeEvent('run_started');
+
     if (!runStartCharged) {
         console.warn('[WARN] Failed to charge for run_started event, but continuing execution');
     }
@@ -343,8 +308,7 @@ Actor.main(async () => {
                 const thumbnailUrl = thumbnailPath ? await uploadToStorage(thumbnailPath, 'image', clipIdentifier) : null;
 
                 // Charge for clip_processed event only after successful processing
-                const clipProcessedKey = `clip_processed_${process.env.APIFY_ACTOR_RUN_ID || Date.now()}_${index}`;
-                const clipCharged = await chargeEvent('clip_processed', clipProcessedKey);
+                const clipCharged = await chargeEvent('clip_processed');
 
                 const clipData = {
                     name: clip.name || `clip_${index + 1}`,
