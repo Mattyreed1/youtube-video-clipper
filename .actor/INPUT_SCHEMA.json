@@ -40,10 +40,16 @@
     "quality": {
       "title": "Video Quality & Pricing Tier",
       "type": "string",
-      "description": "Choose video quality tier. All clips cost $0.09 regardless of quality selected.",
-      "enum": ["360p", "480p", "720p"],
-      "enumTitles": ["360p - $0.09 per clip (Basic)", "480p - $0.09 per clip (Recommended)", "720p - $0.09 per clip (High Quality)"],
-      "default": "480p"
+      "description": "Choose video quality tier. Starting Oct 9, 2025: you pay only for the quality actually delivered. Before then: flat $0.09 rate.",
+      "enum": ["360p", "480p", "720p", "1080p"],
+      "enumTitles": ["360p - $0.07 (Basic)", "480p - $0.09 (Standard)", "720p - $0.29 (Recommended)", "1080p - $0.39 (Premium)"],
+      "default": "720p"
+    },
+    "enableFallbacks": {
+      "title": "Enable Fallback Methods",
+      "type": "boolean",
+      "description": "Allow expensive fallback processing if primary method fails. May incur additional charges ($0.09 per fallback) but significantly improves success rate for difficult videos. Disable for guaranteed pricing with lower success rate.",
+      "default": true
     },
     "maxResolution": {
       "title": "Legacy Maximum Resolution",

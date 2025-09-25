@@ -118,6 +118,11 @@
 						"type": "string",
 						"title": "Quality Warning",
 						"description": "Warning message if requested quality was not available"
+					},
+					"requestedQuality": {
+						"type": "string",
+						"title": "Requested Quality",
+						"description": "The quality tier originally requested by user"
 					}
 				}
 			},
@@ -126,14 +131,14 @@
 					"title": "All Clips",
 					"description": "Complete overview of all processed clips",
 					"transformation": {
-						"fields": ["name", "description", "startTime", "endTime", "duration", "url", "thumbnailUrl", "quality", "maxHeight", "actualResolution", "actualHeight", "qualityWarning", "clipIndex", "processingTime", "failed", "charged", "eventCharged"]
+						"fields": ["name", "description", "startTime", "endTime", "duration", "url", "thumbnailUrl", "quality", "requestedQuality", "actualResolution", "actualHeight", "qualityWarning", "clipIndex", "processingTime", "failed", "charged", "eventCharged"]
 					}
 				},
 				"successful": {
 					"title": "Successful Clips",
 					"description": "Only successfully processed clips (billable items)",
 					"transformation": {
-						"fields": ["name", "description", "startTime", "endTime", "duration", "url", "thumbnailUrl", "quality", "maxHeight", "actualResolution", "actualHeight", "qualityWarning", "clipIndex", "processingTime", "eventCharged"],
+						"fields": ["name", "description", "startTime", "endTime", "duration", "url", "thumbnailUrl", "quality", "requestedQuality", "actualResolution", "actualHeight", "qualityWarning", "clipIndex", "processingTime", "eventCharged"],
 						"filters": [
 							["failed", "=", false],
 							["#summary", "!=", true]

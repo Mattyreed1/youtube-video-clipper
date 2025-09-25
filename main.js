@@ -138,17 +138,57 @@ const validateInput = (input) => {
 };
 
 /**
- * Get quality-based format settings (all clips charge $0.09)
- * @param {string} quality - Quality setting (360p, 480p, 720p)
+ * Get quality-based format settings
+ * @param {string} quality - Quality setting (360p, 480p, 720p, 1080p)
  * @returns {Object} - Quality configuration
  */
 const getQualityConfig = (quality = '480p') => {
     const configs = {
-        '360p': { height: 360, price: 0.09, eventName: 'clip_processed' },
-        '480p': { height: 480, price: 0.09, eventName: 'clip_processed' },
-        '720p': { height: 720, price: 0.09, eventName: 'clip_processed' }
+        '360p': { height: 360, eventName: 'clip_processed_360p' },
+        '480p': { height: 480, eventName: 'clip_processed_480p' },
+        '720p': { height: 720, eventName: 'clip_processed_720p' },
+        '1080p': { height: 1080, eventName: 'clip_processed_1080p' }
     };
     return configs[quality] || configs['480p'];
+};
+
+/**
+ * Map actual video height to quality tier and charging event
+ * @param {number} height - Actual video height in pixels
+ * @returns {Object} - Quality tier info with event name
+ */
+const getQualityTierFromHeight = (height) => {
+    if (!height || height < 360) return { quality: '360p', eventName: 'clip_processed_360p' };
+    if (height < 480) return { quality: '360p', eventName: 'clip_processed_360p' };
+    if (height < 720) return { quality: '480p', eventName: 'clip_processed_480p' };
+    if (height < 1080) return { quality: '720p', eventName: 'clip_processed_720p' };
+    return { quality: '1080p', eventName: 'clip_processed_1080p' };
+};
+
+/**
+ * Determine which charging event to use based on current date
+ * @param {string} requestedQuality - Quality tier requested by user
+ * @param {Object} actualResolution - Actual resolution detected
+ * @returns {string} - Event name to charge
+ */
+const getChargingEvent = (requestedQuality, actualResolution) => {
+    const currentDate = new Date();
+    const transitionDate = new Date('2025-10-09');
+
+    // Before October 9, 2025: use current flat pricing
+    if (currentDate < transitionDate) {
+        return 'clip_processed';
+    }
+
+    // After October 9, 2025: use actual quality-based pricing
+    if (actualResolution && actualResolution.height) {
+        const actualTier = getQualityTierFromHeight(actualResolution.height);
+        return actualTier.eventName;
+    }
+
+    // Fallback: use requested quality event
+    const requestedConfig = getQualityConfig(requestedQuality);
+    return requestedConfig.eventName;
 };
 
 /**
@@ -294,7 +334,8 @@ Actor.main(async () => {
         useCookies,
         cookies,
         maxRetries = 3,
-        quality = '480p' // Quality tier for pricing and format
+        quality = '720p', // Quality tier for pricing and format
+        enableFallbacks = true // Allow expensive fallback methods
     } = input;
 
     // Comprehensive input validation
@@ -306,7 +347,14 @@ Actor.main(async () => {
 
     // Get quality configuration
     const qualityConfig = getQualityConfig(quality);
-    console.log(`Processing clips at ${quality} quality (max height: ${qualityConfig.height}px, cost: $${qualityConfig.price} per clip)`);
+    const currentDate = new Date();
+    const transitionDate = new Date('2025-10-09');
+
+    if (currentDate < transitionDate) {
+        console.log(`Processing clips at ${quality} quality (max height: ${qualityConfig.height}px, flat cost: $0.09 per clip)`);
+    } else {
+        console.log(`Processing clips at ${quality} quality (max height: ${qualityConfig.height}px, charged for actual quality delivered)`);
+    }
 
     // Clean and validate YouTube URL format before processing
     const urlCleaning = cleanYouTubeUrl(videoUrl);
@@ -446,55 +494,97 @@ Actor.main(async () => {
                 }
 
                 // Fallback: try with most compatible settings
-                if (!downloadSucceeded) {
-                    const fallbackCommand = `yt-dlp --no-check-certificates --ignore-errors --no-playlist -f "best/worst" --download-sections "*${startTime}-${endTime}" --no-part --no-mtime --remux-video mp4 -o "${clipPath}" "${processedVideoUrl}"`;
+                if (!downloadSucceeded && enableFallbacks) {
+                    console.log("Primary method failed. Attempting Fallback 1 (compatibility mode) - additional $0.09 charge will apply");
+
+                    // Optimize format selector to respect quality limits
+                    const height = qualityConfig.height;
+                    const fallbackCommand = `yt-dlp --no-check-certificates --ignore-errors --no-playlist -f "best[height<=${height}]/worst" --download-sections "*${startTime}-${endTime}" --no-part --no-mtime --remux-video mp4 -o "${clipPath}" "${processedVideoUrl}"`;
                     let fallbackCmd = fallbackCommand;
                     if (cookieFilePath) fallbackCmd += ` --cookies "${cookieFilePath}"`;
                     if (sharedProxyUrl) fallbackCmd += ` --proxy "${sharedProxyUrl}"`;
 
-                    console.log("Executing yt-dlp fallback with maximum compatibility");
-                    await executeWithRetry(
-                        fallbackCmd,
-                        maxRetries,
-                        clipTimeout,
-                        `${clip.name} (fallback)`
-                    );
+                    try {
+                        await executeWithRetry(
+                            fallbackCmd,
+                            maxRetries,
+                            clipTimeout,
+                            `${clip.name} (fallback)`
+                        );
+
+                        // Charge additional clip_processed event for fallback processing
+                        if (fs.existsSync(clipPath)) {
+                            const fallbackCharged = await chargeEvent('clip_processed');
+                            if (fallbackCharged) {
+                                console.log("Fallback 1 successful - additional processing charge ($0.09) applied");
+                            } else {
+                                console.warn("Fallback 1 successful but failed to charge additional processing fee");
+                            }
+                        }
+                    } catch (fallbackError) {
+                        console.warn(`Fallback 1 failed: ${fallbackError.message}`);
+                    }
+                } else if (!downloadSucceeded && !enableFallbacks) {
+                    console.log("Primary method failed but fallbacks are disabled. Clip processing will fail.");
                 }
 
                 // Final fallback: download full video and extract with ffmpeg if yt-dlp section download fails
-                if (!fs.existsSync(clipPath)) {
-                    console.log("Section download failed, attempting full video download with ffmpeg extraction");
-                    const fullVideoPath = path.join(tempDir, `full_video_${clipIdentifier}.%(ext)s`);
-                    const fullVideoCommand = `yt-dlp --no-check-certificates --ignore-errors -f "best[ext=mp4]/best" --no-part --no-mtime -o "${fullVideoPath}" "${processedVideoUrl}"`;
+                if (!fs.existsSync(clipPath) && enableFallbacks) {
+                    // Safeguard: Skip expensive full video downloads for very long videos with short clips
+                    const clipDurationMinutes = duration / 60;
+                    const videoTooLongForFullDownload = clipDurationMinutes < 5; // Less than 5 minutes clip
 
-                    let fullVideoCmd = fullVideoCommand;
-                    if (cookieFilePath) fullVideoCmd += ` --cookies "${cookieFilePath}"`;
-                    if (sharedProxyUrl) fullVideoCmd += ` --proxy "${sharedProxyUrl}"`;
+                    if (videoTooLongForFullDownload) {
+                        console.log("⚠️ Safeguard: Skipping full video download for short clip. This prevents excessive bandwidth costs.");
+                        console.log("Consider using a longer clip duration or enabling cookies/proxy for better compatibility.");
+                    } else {
+                        console.log("Section download failed, attempting Fallback 2 (full video download + extraction) - additional $0.09 charge will apply");
+                        console.log("⚠️ WARNING: This method downloads the entire video and may use significant bandwidth");
 
-                    try {
-                        await executeWithRetry(
-                            fullVideoCmd,
-                            2, // Fewer retries for full video
-                            180000, // 3 minutes for full video
-                            `${clip.name} (full video)`
-                        );
+                        const fullVideoPath = path.join(tempDir, `full_video_${clipIdentifier}.%(ext)s`);
+                        // Respect quality limits even for full video downloads
+                        const height = qualityConfig.height;
+                        const fullVideoCommand = `yt-dlp --no-check-certificates --ignore-errors -f "best[height<=${height}]/best[ext=mp4]/best" --no-part --no-mtime -o "${fullVideoPath}" "${processedVideoUrl}"`;
 
-                        // Find the downloaded file
-                        const downloadedFiles = fs.readdirSync(tempDir).filter(f => f.startsWith(`full_video_${clipIdentifier}`));
-                        if (downloadedFiles.length > 0) {
-                            const fullVideoFile = path.join(tempDir, downloadedFiles[0]);
+                        let fullVideoCmd = fullVideoCommand;
+                        if (cookieFilePath) fullVideoCmd += ` --cookies "${cookieFilePath}"`;
+                        if (sharedProxyUrl) fullVideoCmd += ` --proxy "${sharedProxyUrl}"`;
 
-                            // Extract section with ffmpeg
-                            const ffmpegCommand = `ffmpeg -hide_banner -loglevel error -y -i "${fullVideoFile}" -ss ${startTime} -t ${duration} -c copy "${clipPath}"`;
-                            execSync(ffmpegCommand, { stdio: 'pipe', timeout: 60000 });
+                        try {
+                            await executeWithRetry(
+                                fullVideoCmd,
+                                2, // Fewer retries for full video
+                                180000, // 3 minutes for full video
+                                `${clip.name} (full video)`
+                            );
 
-                            // Clean up full video file
-                            fs.rmSync(fullVideoFile);
-                            console.log(`Successfully extracted ${duration}s clip using ffmpeg`);
+                            // Find the downloaded file
+                            const downloadedFiles = fs.readdirSync(tempDir).filter(f => f.startsWith(`full_video_${clipIdentifier}`));
+                            if (downloadedFiles.length > 0) {
+                                const fullVideoFile = path.join(tempDir, downloadedFiles[0]);
+
+                                // Extract section with ffmpeg
+                                const ffmpegCommand = `ffmpeg -hide_banner -loglevel error -y -i "${fullVideoFile}" -ss ${startTime} -t ${duration} -c copy "${clipPath}"`;
+                                execSync(ffmpegCommand, { stdio: 'pipe', timeout: 60000 });
+
+                                // Clean up full video file
+                                fs.rmSync(fullVideoFile);
+                                console.log(`Successfully extracted ${duration}s clip using ffmpeg`);
+
+                                // Charge additional clip_processed event for full video fallback processing
+                                const fallback2Charged = await chargeEvent('clip_processed');
+                                if (fallback2Charged) {
+                                    console.log("Fallback 2 successful - additional processing charge ($0.09) applied");
+                                } else {
+                                    console.warn("Fallback 2 successful but failed to charge additional processing fee");
+                                }
+                            }
+                        } catch (ffmpegError) {
+                            console.warn(`Final fallback failed: ${ffmpegError.message}`);
                         }
-                    } catch (ffmpegError) {
-                        console.warn(`Final fallback failed: ${ffmpegError.message}`);
                     }
+                } else if (!fs.existsSync(clipPath) && !enableFallbacks) {
+                    console.log("All fallback methods disabled and primary method failed. Clip processing failed.");
                 }
 
                 if (!fs.existsSync(clipPath)) {
@@ -507,7 +597,17 @@ Actor.main(async () => {
                 let qualityWarning = '';
 
                 if (actualResolution && actualResolution.height < requestedHeight) {
-                    qualityWarning = `⚠️  QUALITY NOTICE: Requested ${quality} (${requestedHeight}p) but video source only available at ${actualResolution.resolution}. You are still charged for ${quality} tier.`;
+                    const currentDate = new Date();
+                    const transitionDate = new Date('2025-10-09');
+
+                    if (currentDate < transitionDate) {
+                        // Before transition: flat pricing
+                        qualityWarning = `⚠️  QUALITY NOTICE: Requested ${quality} but video source only available at ${actualResolution.resolution}. Charged flat rate ($0.09).`;
+                    } else {
+                        // After transition: fair pricing based on actual quality
+                        const actualTier = getQualityTierFromHeight(actualResolution.height);
+                        qualityWarning = `⚠️  QUALITY NOTICE: Requested ${quality} but video source only available at ${actualResolution.resolution}. Charged ${actualTier.quality} rate (fair pricing).`;
+                    }
                     console.log(`[QUALITY NOTICE] ${clip.name}: ${qualityWarning}`);
                 }
 
@@ -526,8 +626,9 @@ Actor.main(async () => {
                 const clipUrl = await uploadToStorage(clipPath, 'video', clipIdentifier);
                 const thumbnailUrl = thumbnailPath ? await uploadToStorage(thumbnailPath, 'image', clipIdentifier) : null;
 
-                // Charge for quality-specific clip processing event
-                const clipCharged = await chargeEvent(qualityConfig.eventName);
+                // Determine the correct charging event based on actual quality delivered
+                const chargingEventName = getChargingEvent(quality, actualResolution);
+                const clipCharged = await chargeEvent(chargingEventName);
 
                 const clipData = {
                     name: clip.name || `clip_${index + 1}`,
@@ -549,7 +650,8 @@ Actor.main(async () => {
                     processingTime: new Date().toISOString(),
                     failed: false,
                     charged: clipCharged,
-                    eventCharged: qualityConfig.eventName
+                    requestedQuality: quality,
+                    eventCharged: chargingEventName
                 };
 
                 await Actor.pushData(clipData);
