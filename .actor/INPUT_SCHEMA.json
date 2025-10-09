@@ -19,13 +19,18 @@
       "prefill": [
         {
           "name": "intro_clip",
-          "start": "00:00:05",
+          "start": "00:00:00",
           "end": "00:00:15"
         },
         {
-          "name": "highlight_moment",
+          "name": "clip_1",
           "start": "00:01:30",
           "end": "00:01:45"
+        },
+        {
+          "name": "clip_2",
+          "start": "00:02:30",
+          "end": "00:02:45"
         }
       ]
     },
@@ -50,14 +55,6 @@
       "type": "boolean",
       "description": "Allow expensive fallback processing if primary method fails. May incur additional charges ($0.09 per fallback) but significantly improves success rate for difficult videos. Disable for guaranteed pricing with lower success rate.",
       "default": true
-    },
-    "maxResolution": {
-      "title": "Legacy Maximum Resolution",
-      "type": "string",
-      "description": "Legacy parameter for backward compatibility. Use 'quality' parameter instead.",
-      "enum": ["480", "720"],
-      "enumTitles": ["480p", "720p"],
-      "default": "480"
     },
     "useCookies": {
       "title": "Use YouTube Cookies",

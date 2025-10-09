@@ -8,8 +8,7 @@
     "start": "node main.js"
   },
   "dependencies": {
-    "apify": "^3.0.0",
-    "axios": "^1.6.0"
+    "apify": "^3.0.0"
   },
   "devDependencies": {
     "@apify/storage-local": "^2.1.0"
