@@ -465,7 +465,7 @@ Actor.main(async () => {
                 clipPath = path.join(tempDir, `${clipIdentifier}.mp4`);
 
                 // First attempt: download with resolution cap and better options
-                let ytDlpCommand = `yt-dlp --no-check-certificates --ignore-errors --no-playlist -f "${formatSelector}" --download-sections "*${startTime}-${endTime}" --no-part --no-mtime --remux-video mp4 -o "${clipPath}" "${processedVideoUrl}"`;
+                let ytDlpCommand = `yt-dlp --extractor-args "youtube:skip=hls" --no-check-certificates --ignore-errors --no-playlist -f "${formatSelector}" --download-sections "*${startTime}-${endTime}" --no-part --no-mtime --remux-video mp4 -o "${clipPath}" "${processedVideoUrl}"`;
 
                 // Append cookies if provided
                 if (cookieFilePath) {
