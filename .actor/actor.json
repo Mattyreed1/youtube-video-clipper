@@ -35,17 +35,17 @@
 						"description": "Clip end time in HH:MM:SS format"
 					},
 					"duration": {
-						"type": "number",
+						"type": ["number", "null"],
 						"title": "Duration",
 						"description": "Clip duration in seconds"
 					},
 					"url": {
-						"type": "string",
+						"type": ["string", "null"],
 						"title": "Download URL",
 						"description": "Public URL to download the clip"
 					},
 					"size": {
-						"type": "number",
+						"type": ["number", "null"],
 						"title": "File Size",
 						"description": "File size in bytes"
 					},
@@ -60,12 +60,12 @@
 						"description": "Order of this clip in the batch"
 					},
 					"thumbnailUrl": {
-						"type": "string",
+						"type": ["string", "null"],
 						"title": "Thumbnail",
 						"description": "URL to video thumbnail"
 					},
 					"outputFormat": {
-						"type": "string",
+						"type": ["string", "null"],
 						"title": "Format",
 						"description": "Output video format"
 					},
@@ -75,7 +75,7 @@
 						"description": "When the clip was processed"
 					},
 					"error": {
-						"type": "string",
+						"type": ["string", "null"],
 						"title": "Error",
 						"description": "Error message if processing failed"
 					},
@@ -90,37 +90,37 @@
 						"description": "Whether the clip was successfully charged"
 					},
 					"quality": {
-						"type": "string",
+						"type": ["string", "null"],
 						"title": "Quality",
 						"description": "Video quality tier used for processing"
 					},
 					"maxHeight": {
-						"type": "number",
+						"type": ["number", "null"],
 						"title": "Max Height",
 						"description": "Maximum height in pixels for the quality tier"
 					},
 					"eventCharged": {
-						"type": "string",
+						"type": ["string", "null"],
 						"title": "Event Charged",
 						"description": "The specific charging event that was used"
 					},
 					"actualResolution": {
-						"type": "string",
+						"type": ["string", "null"],
 						"title": "Actual Resolution",
 						"description": "The actual resolution delivered (e.g. '480p')"
 					},
 					"actualHeight": {
-						"type": "number",
+						"type": ["number", "null"],
 						"title": "Actual Height",
 						"description": "The actual height in pixels delivered"
 					},
 					"qualityWarning": {
-						"type": "string",
+						"type": ["string", "null"],
 						"title": "Quality Warning",
 						"description": "Warning message if requested quality was not available"
 					},
 					"requestedQuality": {
-						"type": "string",
+						"type": ["string", "null"],
 						"title": "Requested Quality",
 						"description": "The quality tier originally requested by user"
 					},

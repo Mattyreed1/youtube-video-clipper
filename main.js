@@ -675,12 +675,24 @@ Actor.main(async () => {
                     description: clip.text || `Clip from ${clip.start} to ${clip.end}`,
                     startTime: clip.start,
                     endTime: clip.end,
-                    error: error.message,
+                    url: null,
+                    thumbnailUrl: null,
+                    duration: null,
+                    size: null,
+                    quality: quality,
+                    maxHeight: qualityConfig.height,
+                    actualResolution: null,
+                    actualHeight: null,
+                    qualityWarning: null,
+                    outputFormat: 'mp4',
                     clipIndex: index + 1,
                     videoUrl: processedVideoUrl,
                     processingTime: new Date().toISOString(),
                     failed: true,
-                    charged: false, // Failed clips are not charged
+                    charged: false,
+                    requestedQuality: quality,
+                    eventCharged: null,
+                    error: error.message,
                 });
                 failedCount++;
                 processedClipNames.add(clip.name); // Mark as attempted to avoid reprocessing

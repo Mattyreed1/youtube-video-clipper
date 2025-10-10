@@ -42,6 +42,32 @@ if (missingFields.length > 0) {
     console.log('✅ All required fields present in schema\n');
 }
 
+// Check nullable fields (fields that can receive null values from the code)
+const nullableFields = ['thumbnailUrl', 'actualResolution', 'actualHeight', 
+    'qualityWarning', 'error', 'url', 'duration', 'size', 'outputFormat',
+    'quality', 'maxHeight', 'requestedQuality', 'eventCharged'];
+
+const nonNullableErrors = [];
+for (const field of nullableFields) {
+    const fieldDef = actorConfig.storages.dataset.fields.properties[field];
+    if (fieldDef) {
+        // Check if type is an array (e.g., ["string", "null"]) or just a string
+        if (!Array.isArray(fieldDef.type)) {
+            console.log(`❌ Field '${field}' should allow null: change "type": "${fieldDef.type}" to "type": ["${fieldDef.type}", "null"]`);
+            nonNullableErrors.push(field);
+        } else if (!fieldDef.type.includes('null')) {
+            console.log(`❌ Field '${field}' type array does not include "null": ${JSON.stringify(fieldDef.type)}`);
+            nonNullableErrors.push(field);
+        }
+    }
+}
+
+if (nonNullableErrors.length === 0) {
+    console.log('✅ All nullable fields properly configured\n');
+} else {
+    console.log('');
+}
+
 if (extraFields.length > 0) {
     console.log('⚠️  Extra fields in schema (not pushed by actor):');
     extraFields.forEach(field => console.log(`   - ${field}`));
@@ -58,11 +84,18 @@ Object.keys(views).forEach(viewName => {
     console.log(`   - ${viewName}: ${views[viewName].title}`);
 });
 
-if (missingFields.length === 0) {
+if (missingFields.length === 0 && nonNullableErrors.length === 0) {
     console.log('\n✅ Schema validation PASSED - All fields are properly defined!');
     process.exit(0);
 } else {
-    console.log('\n❌ Schema validation FAILED - Please add missing fields to actor.json');
+    console.log('\n❌ Schema validation FAILED');
+    if (missingFields.length > 0) {
+        console.log('   - Missing fields in schema');
+    }
+    if (nonNullableErrors.length > 0) {
+        console.log('   - Nullable field type mismatches');
+    }
+    console.log('   Please fix the issues above in actor.json\n');
     process.exit(1);
 }
 
