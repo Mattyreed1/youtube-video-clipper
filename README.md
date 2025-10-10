@@ -87,7 +87,9 @@ Go to the input tab for a full explanation of the JSON input format.
 
 ## 🔽 Output sample
 
-Each processed clip returns detailed information including direct download URLs:
+Each processed clip returns detailed information with a **consistent 21-field structure** for easy integration:
+
+### Successful Clip Record
 
 ```json
 {
@@ -101,17 +103,75 @@ Each processed clip returns detailed information including direct download URLs:
   "size": 2457600,
   "quality": "720p",
   "maxHeight": 720,
+  "actualResolution": "720p",
+  "actualHeight": 720,
+  "qualityWarning": null,
   "outputFormat": "mp4",
   "clipIndex": 1,
   "videoUrl": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-  "processingTime": "2024-01-15T10:30:45.123Z",
+  "processingTime": "2025-01-15T10:30:45.123Z",
   "failed": false,
   "charged": true,
-  "eventCharged": "clip_processed_720p"
+  "requestedQuality": "720p",
+  "eventCharged": "clip_processed_720p",
+  "error": null
 }
 ```
 
-The clips are stored in Apify's key-value store and accessible via direct URLs for immediate use.
+### Failed Clip Record
+
+If a clip fails to process, it returns the **same 21-field structure** with null values for non-applicable fields:
+
+```json
+{
+  "name": "failed_clip",
+  "description": "Clip from 00:01:00 to 00:01:10",
+  "startTime": "00:01:00",
+  "endTime": "00:01:10",
+  "url": null,
+  "thumbnailUrl": null,
+  "duration": null,
+  "size": null,
+  "quality": "720p",
+  "maxHeight": 720,
+  "actualResolution": null,
+  "actualHeight": null,
+  "qualityWarning": null,
+  "outputFormat": "mp4",
+  "clipIndex": 2,
+  "videoUrl": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+  "processingTime": "2025-01-15T10:30:47.456Z",
+  "failed": true,
+  "charged": false,
+  "requestedQuality": "720p",
+  "eventCharged": null,
+  "error": "Video unavailable or download failed"
+}
+```
+
+### Summary Record
+
+At the end of each run, a summary record is added with run statistics:
+
+```json
+{
+  "#summary": true,
+  "totalClips": 2,
+  "processedCount": 1,
+  "failedCount": 1,
+  "runStartCharged": true,
+  "runFinished": "2025-01-15T10:30:50.789Z",
+  "qualityUsed": "720p",
+  "resumedFromPrevious": false
+}
+```
+
+**Key Benefits:**
+- **Consistent structure**: All clip records have identical fields for reliable querying
+- **Clear status**: Use `failed` field to filter successful vs failed clips
+- **No charges for failures**: `charged: false` for failed clips
+- **Error details**: `error` field contains failure reason
+- **Direct URLs**: Clips stored in Apify's key-value store with immediate access
 
 ## Integrate YouTube Video Clipper and automate your workflow
 
