@@ -87,9 +87,9 @@ Go to the input tab for a full explanation of the JSON input format.
 
 ## 🔽 Output sample
 
-Each processed clip returns detailed information with a **consistent 21-field structure** for easy integration:
+Each processed clip returns detailed information including direct download URLs:
 
-### Successful Clip Record
+### Successful Clip
 
 ```json
 {
@@ -118,9 +118,9 @@ Each processed clip returns detailed information with a **consistent 21-field st
 }
 ```
 
-### Failed Clip Record
+### Failed Clip
 
-If a clip fails to process, it returns the **same 21-field structure** with null values for non-applicable fields:
+If a clip fails to process, you'll receive details about the failure:
 
 ```json
 {
@@ -166,12 +166,7 @@ At the end of each run, a summary record is added with run statistics:
 }
 ```
 
-**Key Benefits:**
-- **Consistent structure**: All clip records have identical fields for reliable querying
-- **Clear status**: Use `failed` field to filter successful vs failed clips
-- **No charges for failures**: `charged: false` for failed clips
-- **Error details**: `error` field contains failure reason
-- **Direct URLs**: Clips stored in Apify's key-value store with immediate access
+All clips are stored in Apify's key-value store and accessible via direct URLs. Failed clips are never charged and include error details for debugging.
 
 ## Integrate YouTube Video Clipper and automate your workflow
 
