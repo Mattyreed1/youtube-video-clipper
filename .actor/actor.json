@@ -123,6 +123,46 @@
 						"type": "string",
 						"title": "Requested Quality",
 						"description": "The quality tier originally requested by user"
+					},
+					"#summary": {
+						"type": "boolean",
+						"title": "Summary Record",
+						"description": "Indicates this is a summary record rather than a clip"
+					},
+					"totalClips": {
+						"type": "number",
+						"title": "Total Clips",
+						"description": "Total number of clips in the run"
+					},
+					"processedCount": {
+						"type": "number",
+						"title": "Processed Count",
+						"description": "Number of successfully processed clips"
+					},
+					"failedCount": {
+						"type": "number",
+						"title": "Failed Count",
+						"description": "Number of failed clips"
+					},
+					"runStartCharged": {
+						"type": "boolean",
+						"title": "Run Start Charged",
+						"description": "Whether the run_started event was successfully charged"
+					},
+					"runFinished": {
+						"type": "string",
+						"title": "Run Finished",
+						"description": "Timestamp when the run completed"
+					},
+					"qualityUsed": {
+						"type": "string",
+						"title": "Quality Used",
+						"description": "Quality tier used for the run"
+					},
+					"resumedFromPrevious": {
+						"type": "boolean",
+						"title": "Resumed From Previous",
+						"description": "Whether this run resumed from a previous interrupted run"
 					}
 				}
 			},
@@ -142,6 +182,16 @@
 						"filters": [
 							["failed", "=", false],
 							["#summary", "!=", true]
+						]
+					}
+				},
+				"summary": {
+					"title": "Run Summary",
+					"description": "Summary of the actor run with statistics",
+					"transformation": {
+						"fields": ["totalClips", "processedCount", "failedCount", "runStartCharged", "runFinished", "qualityUsed", "resumedFromPrevious"],
+						"filters": [
+							["#summary", "=", true]
 						]
 					}
 				}
