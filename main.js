@@ -224,16 +224,110 @@ async function detectVideoResolution(filePath) {
 }
 
 /**
- * Execute command with retry logic and exponential backoff
- * @param {string} command - Command to execute
+ * Test proxy health with a small YouTube request
+ * @param {string} proxyUrl - Proxy URL to test
+ * @returns {Promise<Object>} - Health check result with responseTime and success
+ */
+async function testProxyHealth(proxyUrl) {
+    const startTime = Date.now();
+    try {
+        // Make a lightweight test request to YouTube
+        const testCommand = `curl -x "${proxyUrl}" -s -o /dev/null -w "%{http_code}" --max-time 10 "https://www.youtube.com"`;
+        const statusCode = execSync(testCommand, { encoding: 'utf8', timeout: 12000 }).trim();
+        const responseTime = Date.now() - startTime;
+
+        const success = statusCode === '200' || statusCode === '301' || statusCode === '302';
+
+        return {
+            success,
+            responseTime,
+            statusCode,
+            quality: responseTime < 2000 ? 'good' : responseTime < 5000 ? 'fair' : 'poor'
+        };
+    } catch (error) {
+        return {
+            success: false,
+            responseTime: Date.now() - startTime,
+            statusCode: 'timeout',
+            quality: 'failed',
+            error: error.message
+        };
+    }
+}
+
+/**
+ * Create a new proxy session with health checking
+ * @param {Object} proxyConfiguration - Apify proxy configuration
+ * @param {number} maxAttempts - Maximum attempts to find a healthy proxy
+ * @returns {Promise<Object>} - New proxy URL and health metrics
+ */
+async function getHealthyProxySession(proxyConfiguration, maxAttempts = 3) {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        const sessionName = `youtube_clipper_${randomString(6)}`;
+        const proxyUrl = await proxyConfiguration.newUrl(sessionName);
+
+        console.log(`[PROXY HEALTH] Testing session ${sessionName} (attempt ${attempt}/${maxAttempts})...`);
+        const health = await testProxyHealth(proxyUrl);
+
+        if (health.success && health.quality !== 'poor') {
+            console.log(`[PROXY HEALTH] ✓ Healthy proxy found: ${health.responseTime}ms (${health.quality})`);
+            return { proxyUrl, sessionName, health };
+        }
+
+        console.log(`[PROXY HEALTH] ✗ Unhealthy proxy: ${health.responseTime}ms (${health.quality || health.error})`);
+
+        if (attempt < maxAttempts) {
+            await new Promise(resolve => setTimeout(resolve, 1000)); // Brief delay before retry
+        }
+    }
+
+    // If all attempts fail, return the last one anyway (better than nothing)
+    console.log(`[PROXY HEALTH] ⚠ Could not find healthy proxy after ${maxAttempts} attempts, using last session`);
+    const fallbackSessionName = `youtube_clipper_${randomString(6)}`;
+    const fallbackProxyUrl = await proxyConfiguration.newUrl(fallbackSessionName);
+    return {
+        proxyUrl: fallbackProxyUrl,
+        sessionName: fallbackSessionName,
+        health: { success: false, quality: 'unknown' }
+    };
+}
+
+/**
+ * Check if error is network-related and should trigger proxy rotation
+ * @param {Error} error - Error object
+ * @returns {boolean} - True if network error
+ */
+function isNetworkError(error) {
+    const errorMsg = (error.message || '').toLowerCase();
+    const networkErrors = [
+        'etimedout',
+        'econnreset',
+        'ssl:',
+        'unexpected_eof',
+        'tunnel connection failed',
+        'timed out',
+        'connection refused'
+    ];
+    return networkErrors.some(err => errorMsg.includes(err));
+}
+
+/**
+ * Execute command with retry logic, exponential backoff, and proxy rotation
+ * @param {Function|string} commandOrBuilder - Command string or function that builds command
  * @param {number} maxRetries - Maximum number of retry attempts
  * @param {number} timeout - Timeout per attempt in milliseconds
  * @param {string} clipName - Name of clip for logging
+ * @param {Object} options - Additional options (proxyConfiguration, onProxyRotate callback)
  * @returns {Promise<boolean>} - Returns true if successful
  */
-async function executeWithRetry(command, maxRetries = 3, timeout = 120000, clipName = '') {
+async function executeWithRetry(commandOrBuilder, maxRetries = 3, timeout = 120000, clipName = '', options = {}) {
+    const { proxyConfiguration, onProxyRotate } = options;
+
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
+            // Rebuild command if it's a function (allows dynamic proxy URL after rotation)
+            const command = typeof commandOrBuilder === 'function' ? commandOrBuilder() : commandOrBuilder;
+
             console.log(`[ATTEMPT ${attempt}/${maxRetries}] Executing command for ${clipName}`);
             execSync(command, { stdio: "inherit", timeout });
             console.log(`[SUCCESS] Command completed successfully for ${clipName}`);
@@ -241,15 +335,29 @@ async function executeWithRetry(command, maxRetries = 3, timeout = 120000, clipN
         } catch (error) {
             const isLastAttempt = attempt === maxRetries;
             const errorMsg = error.message || 'Unknown error';
+            const isNetworkIssue = isNetworkError(error);
 
             if (isLastAttempt) {
                 console.error(`[FINAL FAILURE] All ${maxRetries} attempts failed for ${clipName}: ${errorMsg}`);
                 throw error;
             }
 
-            // Exponential backoff: 5s, 15s, 30s
-            const delaySeconds = Math.min(5 * Math.pow(2, attempt - 1), 30);
             console.warn(`[RETRY] Attempt ${attempt} failed for ${clipName}: ${errorMsg}`);
+
+            // If network error and proxy rotation is available, try rotating proxy
+            if (isNetworkIssue && proxyConfiguration && onProxyRotate) {
+                console.log(`[PROXY ROTATION] Network error detected, rotating to new proxy session...`);
+                try {
+                    const newProxySession = await getHealthyProxySession(proxyConfiguration);
+                    await onProxyRotate(newProxySession);
+                    console.log(`[PROXY ROTATION] Switched to new session: ${newProxySession.sessionName}`);
+                } catch (rotateError) {
+                    console.warn(`[PROXY ROTATION] Failed to rotate proxy: ${rotateError.message}`);
+                }
+            }
+
+            // Exponential backoff: 5s, 10s, 20s
+            const delaySeconds = 5 * Math.pow(2, attempt - 1);
             console.log(`[DELAY] Waiting ${delaySeconds} seconds before retry...`);
 
             await new Promise(resolve => setTimeout(resolve, delaySeconds * 1000));
@@ -422,12 +530,15 @@ Actor.main(async () => {
         console.log("Proxy has been explicitly disabled.");
     }
 
-    // Establish a sticky proxy session so all range requests share the same IP
+    // Establish a healthy proxy session with pre-flight health check
     let sharedProxyUrl = null;
+    let currentProxySession = null;
     if (proxyConfiguration) {
-        const proxySessionName = `youtube_clipper_${randomString(6)}`;
-        sharedProxyUrl = await proxyConfiguration.newUrl(proxySessionName);
-        console.log(`Sticky proxy session initialised: ${proxySessionName}`);
+        console.log('[PROXY] Initializing proxy session with health check...');
+        const proxySession = await getHealthyProxySession(proxyConfiguration);
+        sharedProxyUrl = proxySession.proxyUrl;
+        currentProxySession = proxySession.sessionName;
+        console.log(`[PROXY] Sticky proxy session active: ${currentProxySession}`);
     }
 
     try {
@@ -466,17 +577,16 @@ Actor.main(async () => {
 
                 // First attempt: download with resolution cap and better options
                 // Performance optimizations: concurrent fragments (-N 4), buffer size, retries, socket timeout
-                let ytDlpCommand = `yt-dlp --extractor-args "youtube:skip=hls" --no-check-certificates --ignore-errors --no-playlist -N 4 --buffer-size 16K --retries 10 --fragment-retries 10 --socket-timeout 30 -f "${formatSelector}" --download-sections "*${startTime}-${endTime}" --no-part --no-mtime --remux-video mp4 -o "${clipPath}" "${processedVideoUrl}"`;
 
-                // Append cookies if provided
-                if (cookieFilePath) {
-                    ytDlpCommand += ` --cookies "${cookieFilePath}"`;
-                }
+                // Build command dynamically with current proxy URL (supports proxy rotation)
+                const buildYtDlpCommand = (baseCommand, proxyUrl) => {
+                    let cmd = baseCommand;
+                    if (cookieFilePath) cmd += ` --cookies "${cookieFilePath}"`;
+                    if (proxyUrl) cmd += ` --proxy "${proxyUrl}"`;
+                    return cmd;
+                };
 
-                // Reuse the shared proxy URL for all clips instead of generating a new one each time
-                if (sharedProxyUrl) {
-                    ytDlpCommand += ` --proxy "${sharedProxyUrl}"`;
-                }
+                let baseYtDlpCommand = `yt-dlp --extractor-args "youtube:skip=hls" --no-check-certificates --ignore-errors --no-playlist -N 4 --buffer-size 16K --retries 10 --fragment-retries 10 --socket-timeout 30 -f "${formatSelector}" --download-sections "*${startTime}-${endTime}" --no-part --no-mtime --remux-video mp4 -o "${clipPath}" "${processedVideoUrl}"`;
 
                 console.log(`Executing yt-dlp for clip (capped at ${height}p): ${clip.name}`);
                 let downloadSucceeded = false;
@@ -489,11 +599,21 @@ Actor.main(async () => {
                 console.log(`[TIMEOUT] Using ${timeoutMinutes}min timeout for ${duration}s clip (optimized with 4 concurrent fragments)`);
 
                 try {
+                    // Proxy rotation callback updates the shared proxy URL
+                    const onProxyRotate = async (newProxySession) => {
+                        sharedProxyUrl = newProxySession.proxyUrl;
+                        currentProxySession = newProxySession.sessionName;
+                    };
+
+                    // Use function to rebuild command on each attempt (allows proxy rotation)
+                    const commandBuilder = () => buildYtDlpCommand(baseYtDlpCommand, sharedProxyUrl);
+
                     downloadSucceeded = await executeWithRetry(
-                        ytDlpCommand,
+                        commandBuilder,
                         maxRetries,
                         adaptiveTimeout,
-                        `${clip.name} (${quality})`
+                        `${clip.name} (${quality})`,
+                        { proxyConfiguration, onProxyRotate }
                     );
                 } catch (err) {
                     console.warn(`Resolution-capped download failed after ${maxRetries} attempts, trying without cap`);
@@ -506,17 +626,22 @@ Actor.main(async () => {
 
                     // Optimize format selector to respect quality limits, add performance optimizations
                     const height = qualityConfig.height;
-                    const fallbackCommand = `yt-dlp --no-check-certificates --ignore-errors --no-playlist -N 4 --buffer-size 16K --retries 10 --fragment-retries 10 --socket-timeout 30 -f "best[height<=${height}]/worst" --download-sections "*${startTime}-${endTime}" --no-part --no-mtime --remux-video mp4 -o "${clipPath}" "${processedVideoUrl}"`;
-                    let fallbackCmd = fallbackCommand;
-                    if (cookieFilePath) fallbackCmd += ` --cookies "${cookieFilePath}"`;
-                    if (sharedProxyUrl) fallbackCmd += ` --proxy "${sharedProxyUrl}"`;
+                    const baseFallbackCommand = `yt-dlp --no-check-certificates --ignore-errors --no-playlist -N 4 --buffer-size 16K --retries 10 --fragment-retries 10 --socket-timeout 30 -f "best[height<=${height}]/worst" --download-sections "*${startTime}-${endTime}" --no-part --no-mtime --remux-video mp4 -o "${clipPath}" "${processedVideoUrl}"`;
+
+                    const fallbackCommandBuilder = () => buildYtDlpCommand(baseFallbackCommand, sharedProxyUrl);
+
+                    const onProxyRotate = async (newProxySession) => {
+                        sharedProxyUrl = newProxySession.proxyUrl;
+                        currentProxySession = newProxySession.sessionName;
+                    };
 
                     try {
                         await executeWithRetry(
-                            fallbackCmd,
+                            fallbackCommandBuilder,
                             maxRetries,
                             adaptiveTimeout,
-                            `${clip.name} (fallback)`
+                            `${clip.name} (fallback)`,
+                            { proxyConfiguration, onProxyRotate }
                         );
 
                         // Charge additional clip_processed event for fallback processing
@@ -551,20 +676,24 @@ Actor.main(async () => {
                         const fullVideoPath = path.join(tempDir, `full_video_${clipIdentifier}.%(ext)s`);
                         // Respect quality limits even for full video downloads, add performance optimizations
                         const height = qualityConfig.height;
-                        const fullVideoCommand = `yt-dlp --no-check-certificates --ignore-errors -N 4 --buffer-size 16K --retries 10 --fragment-retries 10 --socket-timeout 30 -f "best[height<=${height}]/best[ext=mp4]/best" --no-part --no-mtime -o "${fullVideoPath}" "${processedVideoUrl}"`;
+                        const baseFullVideoCommand = `yt-dlp --no-check-certificates --ignore-errors -N 4 --buffer-size 16K --retries 10 --fragment-retries 10 --socket-timeout 30 -f "best[height<=${height}]/best[ext=mp4]/best" --no-part --no-mtime -o "${fullVideoPath}" "${processedVideoUrl}"`;
 
-                        let fullVideoCmd = fullVideoCommand;
-                        if (cookieFilePath) fullVideoCmd += ` --cookies "${cookieFilePath}"`;
-                        if (sharedProxyUrl) fullVideoCmd += ` --proxy "${sharedProxyUrl}"`;
+                        const fullVideoCommandBuilder = () => buildYtDlpCommand(baseFullVideoCommand, sharedProxyUrl);
+
+                        const onProxyRotate = async (newProxySession) => {
+                            sharedProxyUrl = newProxySession.proxyUrl;
+                            currentProxySession = newProxySession.sessionName;
+                        };
 
                         try {
                             // For full video, need even longer timeout (up to 30 minutes for very long videos)
                             const fullVideoTimeout = 1800000; // 30 minutes max
                             await executeWithRetry(
-                                fullVideoCmd,
+                                fullVideoCommandBuilder,
                                 2, // Fewer retries for full video
                                 fullVideoTimeout,
-                                `${clip.name} (full video)`
+                                `${clip.name} (full video)`,
+                                { proxyConfiguration, onProxyRotate }
                             );
 
                             // Find the downloaded file

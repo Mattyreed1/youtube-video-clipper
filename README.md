@@ -465,7 +465,8 @@ The actor uses concurrent fragment downloads (`-N 4`) to achieve 3-5x faster spe
 **Performance optimizations include:**
 - 4 concurrent fragment downloads for parallel processing
 - Smart buffer management (16KB chunks)
-- Sticky proxy sessions to maintain IP consistency
+- **Intelligent proxy health checking**: Automatically tests proxy quality before use
+- **Automatic proxy rotation**: Switches to new proxy on network failures (SSL errors, timeouts)
 - HLS format skipping for faster progressive downloads
 
 ### Troubleshooting slow downloads or timeouts
@@ -477,10 +478,11 @@ If you experience timeouts or very slow processing (>5 minutes per clip), try th
 - Adaptive timeouts adjust based on clip duration (3-12 min range)
 - If still failing: try providing fresh cookies from a logged-in YouTube session
 
-**2. Proxy issues**
-- The default residential proxy may have slow/unstable connections
-- Actor uses sticky proxy sessions to maintain consistent IP across requests
-- Consider trying different proxy groups in settings
+**2. Proxy issues (now automatically handled)**
+- The actor automatically tests proxy health before starting (response time check)
+- On network errors, automatically rotates to a new proxy session
+- Residential proxies have variable quality - rotation finds better connections
+- No user action required - works automatically
 
 **3. YouTube throttling**
 - YouTube may throttle repeated requests from the same IP
