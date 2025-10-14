@@ -465,7 +465,8 @@ Actor.main(async () => {
                 clipPath = path.join(tempDir, `${clipIdentifier}.mp4`);
 
                 // First attempt: download with resolution cap and better options
-                let ytDlpCommand = `yt-dlp --extractor-args "youtube:skip=hls" --no-check-certificates --ignore-errors --no-playlist -f "${formatSelector}" --download-sections "*${startTime}-${endTime}" --no-part --no-mtime --remux-video mp4 -o "${clipPath}" "${processedVideoUrl}"`;
+                // Performance optimizations: concurrent fragments (-N 4), buffer size, retries, socket timeout
+                let ytDlpCommand = `yt-dlp --extractor-args "youtube:skip=hls" --no-check-certificates --ignore-errors --no-playlist -N 4 --buffer-size 16K --retries 10 --fragment-retries 10 --socket-timeout 30 -f "${formatSelector}" --download-sections "*${startTime}-${endTime}" --no-part --no-mtime --remux-video mp4 -o "${clipPath}" "${processedVideoUrl}"`;
 
                 // Append cookies if provided
                 if (cookieFilePath) {
@@ -479,13 +480,19 @@ Actor.main(async () => {
 
                 console.log(`Executing yt-dlp for clip (capped at ${height}p): ${clip.name}`);
                 let downloadSucceeded = false;
-                const clipTimeout = 120000; // 2 minutes per clip - much more reasonable
+                // Calculate adaptive timeout with optimized concurrent downloads:
+                // Normal case: duration * 2 (expect ~1x download speed with 4 concurrent fragments)
+                // Add 60s buffer for initialization + 30s per retry
+                // Min 3min for small clips, max 12min for large clips or network issues
+                const adaptiveTimeout = Math.max(180000, Math.min((duration * 2 + 60) * 1000, 720000));
+                const timeoutMinutes = (adaptiveTimeout / 60000).toFixed(1);
+                console.log(`[TIMEOUT] Using ${timeoutMinutes}min timeout for ${duration}s clip (optimized with 4 concurrent fragments)`);
 
                 try {
                     downloadSucceeded = await executeWithRetry(
                         ytDlpCommand,
                         maxRetries,
-                        clipTimeout,
+                        adaptiveTimeout,
                         `${clip.name} (${quality})`
                     );
                 } catch (err) {
@@ -497,9 +504,9 @@ Actor.main(async () => {
                 if (!downloadSucceeded && enableFallbacks) {
                     console.log("Primary method failed. Attempting Fallback 1 (compatibility mode) - additional $0.09 charge will apply");
 
-                    // Optimize format selector to respect quality limits
+                    // Optimize format selector to respect quality limits, add performance optimizations
                     const height = qualityConfig.height;
-                    const fallbackCommand = `yt-dlp --no-check-certificates --ignore-errors --no-playlist -f "best[height<=${height}]/worst" --download-sections "*${startTime}-${endTime}" --no-part --no-mtime --remux-video mp4 -o "${clipPath}" "${processedVideoUrl}"`;
+                    const fallbackCommand = `yt-dlp --no-check-certificates --ignore-errors --no-playlist -N 4 --buffer-size 16K --retries 10 --fragment-retries 10 --socket-timeout 30 -f "best[height<=${height}]/worst" --download-sections "*${startTime}-${endTime}" --no-part --no-mtime --remux-video mp4 -o "${clipPath}" "${processedVideoUrl}"`;
                     let fallbackCmd = fallbackCommand;
                     if (cookieFilePath) fallbackCmd += ` --cookies "${cookieFilePath}"`;
                     if (sharedProxyUrl) fallbackCmd += ` --proxy "${sharedProxyUrl}"`;
@@ -508,7 +515,7 @@ Actor.main(async () => {
                         await executeWithRetry(
                             fallbackCmd,
                             maxRetries,
-                            clipTimeout,
+                            adaptiveTimeout,
                             `${clip.name} (fallback)`
                         );
 
@@ -542,19 +549,21 @@ Actor.main(async () => {
                         console.log("⚠️ WARNING: This method downloads the entire video and may use significant bandwidth");
 
                         const fullVideoPath = path.join(tempDir, `full_video_${clipIdentifier}.%(ext)s`);
-                        // Respect quality limits even for full video downloads
+                        // Respect quality limits even for full video downloads, add performance optimizations
                         const height = qualityConfig.height;
-                        const fullVideoCommand = `yt-dlp --no-check-certificates --ignore-errors -f "best[height<=${height}]/best[ext=mp4]/best" --no-part --no-mtime -o "${fullVideoPath}" "${processedVideoUrl}"`;
+                        const fullVideoCommand = `yt-dlp --no-check-certificates --ignore-errors -N 4 --buffer-size 16K --retries 10 --fragment-retries 10 --socket-timeout 30 -f "best[height<=${height}]/best[ext=mp4]/best" --no-part --no-mtime -o "${fullVideoPath}" "${processedVideoUrl}"`;
 
                         let fullVideoCmd = fullVideoCommand;
                         if (cookieFilePath) fullVideoCmd += ` --cookies "${cookieFilePath}"`;
                         if (sharedProxyUrl) fullVideoCmd += ` --proxy "${sharedProxyUrl}"`;
 
                         try {
+                            // For full video, need even longer timeout (up to 30 minutes for very long videos)
+                            const fullVideoTimeout = 1800000; // 30 minutes max
                             await executeWithRetry(
                                 fullVideoCmd,
                                 2, // Fewer retries for full video
-                                180000, // 3 minutes for full video
+                                fullVideoTimeout,
                                 `${clip.name} (full video)`
                             );
 

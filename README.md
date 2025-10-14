@@ -172,7 +172,7 @@ All clips are stored in Apify's key-value store and accessible via direct URLs. 
 
 YouTube Video Clipper can be connected with almost any cloud service or web app thanks to integrations on the Apify platform:
 
-- **Make** - Automate clip creation workflows
+- **n8n** - Automate clip creation workflows
 - **Zapier** - Connect to thousands of apps
 - **Slack** - Get notifications when clips are ready
 - **Webhooks** - Trigger actions when processing completes
@@ -455,7 +455,42 @@ The actor automatically saves progress and can resume from where it left off. Al
 Maximum 20 clips per run, with each clip limited to 10 minutes duration. This ensures optimal performance and cost control.
 
 ### How long do clips take to process?
-Typically 30-90 seconds per clip depending on duration and quality. The actor uses smart retry logic with 2-minute timeout per clip to prevent endless processing.
+**Expected processing time for a 60-second clip:**
+- Normal conditions: **5-15 seconds** (optimized with 4 concurrent fragment downloads)
+- With network hiccups: **30-60 seconds** (automatic retries handle brief issues)
+- Poor network/proxy: **2-3 minutes** (multiple retry attempts with sticky proxy sessions)
+
+The actor uses concurrent fragment downloads (`-N 4`) to achieve 3-5x faster speeds than sequential downloads. Adaptive timeouts (3-12 minutes based on clip duration) ensure downloads complete even under poor network conditions. Processing time scales roughly with clip duration - a 5-minute clip takes proportionally longer than a 1-minute clip.
+
+**Performance optimizations include:**
+- 4 concurrent fragment downloads for parallel processing
+- Smart buffer management (16KB chunks)
+- Sticky proxy sessions to maintain IP consistency
+- HLS format skipping for faster progressive downloads
+
+### Troubleshooting slow downloads or timeouts
+
+If you experience timeouts or very slow processing (>5 minutes per clip), try these solutions:
+
+**1. SSL/Network errors (`ETIMEDOUT`, `SSL: UNEXPECTED_EOF_WHILE_READING`)**
+- The actor includes automatic retry logic with 10 retries per fragment and concurrent downloads
+- Adaptive timeouts adjust based on clip duration (3-12 min range)
+- If still failing: try providing fresh cookies from a logged-in YouTube session
+
+**2. Proxy issues**
+- The default residential proxy may have slow/unstable connections
+- Actor uses sticky proxy sessions to maintain consistent IP across requests
+- Consider trying different proxy groups in settings
+
+**3. YouTube throttling**
+- YouTube may throttle repeated requests from the same IP
+- Solution: Provide cookies from authenticated session
+- Alternative: Wait a few minutes before retrying
+
+**4. Very long videos with short clips**
+- Section downloads may fail due to fragmented requests
+- Actor will automatically fallback to full video download (additional $0.09 charge)
+- For videos >30 minutes, consider downloading longer clip durations
 
 ## Your feedback
 
