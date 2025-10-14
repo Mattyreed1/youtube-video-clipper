@@ -493,7 +493,9 @@ If you experience timeouts or very slow processing (>5 minutes per clip), try th
 **4. Very long videos with short clips**
 - Section downloads may fail due to fragmented requests
 - Actor will automatically fallback to full video download (additional $0.09 charge)
-- For videos >30 minutes, consider downloading longer clip durations
+- Full video is downloaded once and cached for all clips (massive bandwidth savings)
+- Safeguard: Videos longer than 45 minutes skip full video fallback to prevent excessive costs
+- For very long videos, use cookies/proxy for better section download compatibility
 
 ## Your feedback
 
