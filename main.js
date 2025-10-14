@@ -224,6 +224,35 @@ async function detectVideoResolution(filePath) {
 }
 
 /**
+ * Get video duration in seconds from yt-dlp metadata
+ * @param {string} videoUrl - YouTube video URL
+ * @param {string} proxyUrl - Optional proxy URL
+ * @param {string} cookieFilePath - Optional cookie file path
+ * @returns {Promise<number|null>} - Video duration in seconds, or null if failed
+ */
+async function getVideoDuration(videoUrl, proxyUrl = null, cookieFilePath = null) {
+    try {
+        let command = `yt-dlp --print duration "${videoUrl}"`;
+        if (cookieFilePath) command += ` --cookies "${cookieFilePath}"`;
+        if (proxyUrl) command += ` --proxy "${proxyUrl}"`;
+
+        const duration = execSync(command, { encoding: 'utf8', timeout: 30000 }).trim();
+        const durationSeconds = parseFloat(duration);
+
+        if (isNaN(durationSeconds) || durationSeconds <= 0) {
+            console.warn(`[VIDEO DURATION] Failed to parse duration: ${duration}`);
+            return null;
+        }
+
+        console.log(`[VIDEO DURATION] Total video length: ${Math.floor(durationSeconds / 60)}m ${Math.floor(durationSeconds % 60)}s`);
+        return durationSeconds;
+    } catch (error) {
+        console.warn(`[VIDEO DURATION] Failed to fetch video duration: ${error.message}`);
+        return null;
+    }
+}
+
+/**
  * Test proxy health with a small YouTube request
  * @param {string} proxyUrl - Proxy URL to test
  * @returns {Promise<Object>} - Health check result with responseTime and success
@@ -541,6 +570,13 @@ Actor.main(async () => {
         console.log(`[PROXY] Sticky proxy session active: ${currentProxySession}`);
     }
 
+    // Cache for full video download (shared across all clips to avoid re-downloading)
+    let cachedFullVideoPath = null;
+    let cachedFullVideoQuality = null;
+
+    // Fetch video duration once for safeguard checks (lazy-loaded when needed)
+    let videoDurationSeconds = null;
+
     try {
         // Process each clip
         for (const [index, clip] of clips.entries()) {
@@ -662,52 +698,31 @@ Actor.main(async () => {
 
                 // Final fallback: download full video and extract with ffmpeg if yt-dlp section download fails
                 if (!fs.existsSync(clipPath) && enableFallbacks) {
-                    // Safeguard: Skip expensive full video downloads for very long videos with short clips
-                    const clipDurationMinutes = duration / 60;
-                    const videoTooLongForFullDownload = clipDurationMinutes < 5; // Less than 5 minutes clip
+                    // Safeguard: Fetch video duration once and check if video is too long for full download
+                    if (videoDurationSeconds === null) {
+                        console.log('[VIDEO DURATION] Fetching video metadata for safeguard check...');
+                        videoDurationSeconds = await getVideoDuration(processedVideoUrl, sharedProxyUrl, cookieFilePath);
+                    }
+
+                    const MAX_VIDEO_DURATION_MINUTES = 45; // Don't download full videos longer than 45 minutes
+                    const videoTooLongForFullDownload = videoDurationSeconds && (videoDurationSeconds / 60) > MAX_VIDEO_DURATION_MINUTES;
 
                     if (videoTooLongForFullDownload) {
-                        console.log("⚠️ Safeguard: Skipping full video download for short clip. This prevents excessive bandwidth costs.");
-                        console.log("Consider using a longer clip duration or enabling cookies/proxy for better compatibility.");
+                        const videoMinutes = Math.floor(videoDurationSeconds / 60);
+                        console.log(`⚠️ Safeguard: Skipping full video download - video is ${videoMinutes} minutes (max: ${MAX_VIDEO_DURATION_MINUTES} minutes)`);
+                        console.log("This prevents excessive bandwidth costs. Consider enabling cookies/proxy for better compatibility with section downloads.");
                     } else {
-                        console.log("Section download failed, attempting Fallback 2 (full video download + extraction) - additional $0.09 charge will apply");
-                        console.log("⚠️ WARNING: This method downloads the entire video and may use significant bandwidth");
-
-                        const fullVideoPath = path.join(tempDir, `full_video_${clipIdentifier}.%(ext)s`);
-                        // Respect quality limits even for full video downloads, add performance optimizations
                         const height = qualityConfig.height;
-                        const baseFullVideoCommand = `yt-dlp --no-check-certificates --ignore-errors -N 4 --buffer-size 16K --retries 10 --fragment-retries 10 --socket-timeout 30 -f "best[height<=${height}]/best[ext=mp4]/best" --no-part --no-mtime -o "${fullVideoPath}" "${processedVideoUrl}"`;
 
-                        const fullVideoCommandBuilder = () => buildYtDlpCommand(baseFullVideoCommand, sharedProxyUrl);
+                        // Check if we already have a cached full video at the right quality
+                        if (cachedFullVideoPath && cachedFullVideoQuality === height && fs.existsSync(cachedFullVideoPath)) {
+                            console.log(`[CACHE HIT] Reusing previously downloaded full video for ${clip.name}`);
 
-                        const onProxyRotate = async (newProxySession) => {
-                            sharedProxyUrl = newProxySession.proxyUrl;
-                            currentProxySession = newProxySession.sessionName;
-                        };
-
-                        try {
-                            // For full video, need even longer timeout (up to 30 minutes for very long videos)
-                            const fullVideoTimeout = 1800000; // 30 minutes max
-                            await executeWithRetry(
-                                fullVideoCommandBuilder,
-                                2, // Fewer retries for full video
-                                fullVideoTimeout,
-                                `${clip.name} (full video)`,
-                                { proxyConfiguration, onProxyRotate }
-                            );
-
-                            // Find the downloaded file
-                            const downloadedFiles = fs.readdirSync(tempDir).filter(f => f.startsWith(`full_video_${clipIdentifier}`));
-                            if (downloadedFiles.length > 0) {
-                                const fullVideoFile = path.join(tempDir, downloadedFiles[0]);
-
-                                // Extract section with ffmpeg
-                                const ffmpegCommand = `ffmpeg -hide_banner -loglevel error -y -i "${fullVideoFile}" -ss ${startTime} -t ${duration} -c copy "${clipPath}"`;
+                            try {
+                                // Extract section with ffmpeg from cached video
+                                const ffmpegCommand = `ffmpeg -hide_banner -loglevel error -y -i "${cachedFullVideoPath}" -ss ${startTime} -t ${duration} -c copy "${clipPath}"`;
                                 execSync(ffmpegCommand, { stdio: 'pipe', timeout: 60000 });
-
-                                // Clean up full video file
-                                fs.rmSync(fullVideoFile);
-                                console.log(`Successfully extracted ${duration}s clip using ffmpeg`);
+                                console.log(`Successfully extracted ${duration}s clip from cached video using ffmpeg`);
 
                                 // Charge additional clip_processed event for full video fallback processing
                                 const fallback2Charged = await chargeEvent('clip_processed');
@@ -716,9 +731,67 @@ Actor.main(async () => {
                                 } else {
                                     console.warn("Fallback 2 successful but failed to charge additional processing fee");
                                 }
+                            } catch (ffmpegError) {
+                                console.warn(`Failed to extract from cached video: ${ffmpegError.message}`);
+                                // Don't throw - will try downloading fresh below
+                                cachedFullVideoPath = null; // Invalidate cache
                             }
-                        } catch (ffmpegError) {
-                            console.warn(`Final fallback failed: ${ffmpegError.message}`);
+                        }
+
+                        // If no cache or cache failed, download the full video
+                        if (!fs.existsSync(clipPath)) {
+                            console.log("Section download failed, attempting Fallback 2 (full video download + extraction) - additional $0.09 charge will apply");
+                            console.log("⚠️ WARNING: This method downloads the entire video and may use significant bandwidth");
+
+                            const fullVideoPath = path.join(tempDir, `full_video_cached.%(ext)s`);
+                            // Respect quality limits even for full video downloads, add performance optimizations
+                            const baseFullVideoCommand = `yt-dlp --no-check-certificates --ignore-errors -N 4 --buffer-size 16K --retries 10 --fragment-retries 10 --socket-timeout 30 -f "best[height<=${height}]/best[ext=mp4]/best" --no-part --no-mtime -o "${fullVideoPath}" "${processedVideoUrl}"`;
+
+                            const fullVideoCommandBuilder = () => buildYtDlpCommand(baseFullVideoCommand, sharedProxyUrl);
+
+                            const onProxyRotate = async (newProxySession) => {
+                                sharedProxyUrl = newProxySession.proxyUrl;
+                                currentProxySession = newProxySession.sessionName;
+                            };
+
+                            try {
+                                // For full video, need even longer timeout (up to 30 minutes for very long videos)
+                                const fullVideoTimeout = 1800000; // 30 minutes max
+                                await executeWithRetry(
+                                    fullVideoCommandBuilder,
+                                    2, // Fewer retries for full video
+                                    fullVideoTimeout,
+                                    `${clip.name} (full video)`,
+                                    { proxyConfiguration, onProxyRotate }
+                                );
+
+                                // Find the downloaded file
+                                const downloadedFiles = fs.readdirSync(tempDir).filter(f => f.startsWith(`full_video_cached`));
+                                if (downloadedFiles.length > 0) {
+                                    const fullVideoFile = path.join(tempDir, downloadedFiles[0]);
+
+                                    // Cache the full video for reuse by subsequent clips
+                                    cachedFullVideoPath = fullVideoFile;
+                                    cachedFullVideoQuality = height;
+                                    console.log(`[CACHE] Full video downloaded and cached for reuse: ${fullVideoFile}`);
+
+                                    // Extract section with ffmpeg
+                                    const ffmpegCommand = `ffmpeg -hide_banner -loglevel error -y -i "${fullVideoFile}" -ss ${startTime} -t ${duration} -c copy "${clipPath}"`;
+                                    execSync(ffmpegCommand, { stdio: 'pipe', timeout: 60000 });
+
+                                    console.log(`Successfully extracted ${duration}s clip using ffmpeg`);
+
+                                    // Charge additional clip_processed event for full video fallback processing
+                                    const fallback2Charged = await chargeEvent('clip_processed');
+                                    if (fallback2Charged) {
+                                        console.log("Fallback 2 successful - additional processing charge ($0.09) applied");
+                                    } else {
+                                        console.warn("Fallback 2 successful but failed to charge additional processing fee");
+                                    }
+                                }
+                            } catch (ffmpegError) {
+                                console.warn(`Final fallback failed: ${ffmpegError.message}`);
+                            }
                         }
                     }
                 } else if (!fs.existsSync(clipPath) && !enableFallbacks) {
@@ -858,6 +931,12 @@ Actor.main(async () => {
             await Actor.fail(`Actor execution failed fatally: ${error.message}`);
         }
     } finally {
+        // Clean up cached full video if it exists
+        if (cachedFullVideoPath && fs.existsSync(cachedFullVideoPath)) {
+            console.log(`[CACHE CLEANUP] Removing cached full video: ${cachedFullVideoPath}`);
+            fs.rmSync(cachedFullVideoPath);
+        }
+
         // Clean up the temporary directory and cookies
         if (cookieFilePath && fs.existsSync(cookieFilePath)) {
             fs.rmSync(cookieFilePath);

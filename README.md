@@ -188,7 +188,8 @@ Control reliability vs. cost with the **enableFallbacks** setting:
 **Default ON (Recommended)**: Maximum success rate with transparent additional costs
 - Primary method fails → Fallback 1 (compatibility mode) → +$0.09 processing charge
 - Still fails → Fallback 2 (full video download) → +$0.09 additional charge
-- Built-in safeguards prevent excessive costs for very long videos
+- **Smart caching**: Full video downloaded once and reused for all clips (massive bandwidth savings)
+- **Built-in safeguard**: Videos longer than 45 minutes skip Fallback 2 to prevent excessive costs
 - Quality limits maintained even in fallback modes
 
 **Fallbacks OFF**: Guaranteed predictable pricing with lower success rate
