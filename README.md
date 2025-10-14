@@ -189,7 +189,7 @@ Control reliability vs. cost with the **enableFallbacks** setting:
 - Primary method fails → Fallback 1 (compatibility mode) → +$0.09 processing charge
 - Still fails → Fallback 2 (full video download) → +$0.09 additional charge
 - **Smart caching**: Full video downloaded once and reused for all clips (massive bandwidth savings)
-- **Built-in safeguard**: Videos longer than 45 minutes skip Fallback 2 to prevent excessive costs
+- **Built-in safeguard**: Videos longer than 2 hours skip Fallback 2 to prevent excessive costs
 - Quality limits maintained even in fallback modes
 
 **Fallbacks OFF**: Guaranteed predictable pricing with lower success rate
@@ -494,7 +494,7 @@ If you experience timeouts or very slow processing (>5 minutes per clip), try th
 - Section downloads may fail due to fragmented requests
 - Actor will automatically fallback to full video download (additional $0.09 charge)
 - Full video is downloaded once and cached for all clips (massive bandwidth savings)
-- Safeguard: Videos longer than 45 minutes skip full video fallback to prevent excessive costs
+- Safeguard: Videos longer than 2 hours skip full video fallback to prevent excessive costs
 - For very long videos, use cookies/proxy for better section download compatibility
 
 ## Your feedback

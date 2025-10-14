@@ -704,12 +704,14 @@ Actor.main(async () => {
                         videoDurationSeconds = await getVideoDuration(processedVideoUrl, sharedProxyUrl, cookieFilePath);
                     }
 
-                    const MAX_VIDEO_DURATION_MINUTES = 45; // Don't download full videos longer than 45 minutes
+                    const MAX_VIDEO_DURATION_MINUTES = 120; // Don't download full videos longer than 2 hours
                     const videoTooLongForFullDownload = videoDurationSeconds && (videoDurationSeconds / 60) > MAX_VIDEO_DURATION_MINUTES;
 
                     if (videoTooLongForFullDownload) {
                         const videoMinutes = Math.floor(videoDurationSeconds / 60);
-                        console.log(`⚠️ Safeguard: Skipping full video download - video is ${videoMinutes} minutes (max: ${MAX_VIDEO_DURATION_MINUTES} minutes)`);
+                        const videoHours = Math.floor(videoMinutes / 60);
+                        const remainingMinutes = videoMinutes % 60;
+                        console.log(`⚠️ Safeguard: Skipping full video download - video is ${videoHours}h ${remainingMinutes}m (max: ${MAX_VIDEO_DURATION_MINUTES / 60}h)`);
                         console.log("This prevents excessive bandwidth costs. Consider enabling cookies/proxy for better compatibility with section downloads.");
                     } else {
                         const height = qualityConfig.height;
