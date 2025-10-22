@@ -131,6 +131,13 @@ const validateInput = (input) => {
         errors.push(`Quality must be one of: ${validQualities.join(', ')}`);
     }
 
+    // Validate priorityMode setting
+    const validPriorityModes = ['speed', 'quality'];
+    const priorityMode = input.priorityMode || 'speed';
+    if (!validPriorityModes.includes(priorityMode)) {
+        errors.push(`priorityMode must be one of: ${validPriorityModes.join(', ')}`);
+    }
+
     return {
         isValid: errors.length === 0,
         errors
@@ -462,6 +469,18 @@ async function uploadToStorage(filePath, fileType, clipIdentifier) {
 }
 
 Actor.main(async () => {
+    const autoUpdateYtDlp = process.env.APIFY_IS_AT_HOME !== '1';
+    if (autoUpdateYtDlp) {
+        try {
+            console.log('[SETUP] Ensuring yt-dlp is up to date...');
+            execSync('yt-dlp -U', { stdio: 'inherit', timeout: 20000 });
+        } catch (error) {
+            console.warn(`[SETUP] yt-dlp update skipped: ${error.message}`);
+        }
+    } else {
+        console.log('[SETUP] Skipping yt-dlp self-update (running in ephemeral environment).');
+    }
+
     // Get and validate actor input
     const input = await Actor.getInput();
     const {
@@ -472,7 +491,8 @@ Actor.main(async () => {
         cookies,
         maxRetries = 3,
         quality = '720p', // Quality tier for pricing and format
-        enableFallbacks = true // Allow expensive fallback methods
+        enableFallbacks = true, // Allow expensive fallback methods
+        priorityMode = 'speed' // 'speed' or 'quality' - controls download strategy
     } = input;
 
     // Comprehensive input validation
@@ -488,9 +508,9 @@ Actor.main(async () => {
     const transitionDate = new Date('2025-10-09');
 
     if (currentDate < transitionDate) {
-        console.log(`Processing clips at ${quality} quality (max height: ${qualityConfig.height}px, flat cost: $0.09 per clip)`);
+        console.log(`Processing clips at ${quality} quality (max height: ${qualityConfig.height}px, priority: ${priorityMode}, flat cost: $0.09 per clip)`);
     } else {
-        console.log(`Processing clips at ${quality} quality (max height: ${qualityConfig.height}px, charged for actual quality delivered)`);
+        console.log(`Processing clips at ${quality} quality (max height: ${qualityConfig.height}px, priority: ${priorityMode}, charged for actual quality delivered)`);
     }
 
     // Clean and validate YouTube URL format before processing
@@ -606,7 +626,7 @@ Actor.main(async () => {
 
                 // Use quality-based resolution selection with better format fallbacks
                 const height = qualityConfig.height;
-                const formatSelector = `best[height<=${height}]/best[ext=mp4]/best`;
+                const formatSelector = `bestvideo[height<=${height}]+bestaudio/best[height<=${height}][ext=mp4]/best[ext=mp4]/best`;
 
                 // Prepare file paths
                 clipPath = path.join(tempDir, `${clipIdentifier}.mp4`);
@@ -622,7 +642,8 @@ Actor.main(async () => {
                     return cmd;
                 };
 
-                let baseYtDlpCommand = `yt-dlp --extractor-args "youtube:skip=hls" --no-check-certificates --ignore-errors --no-playlist -N 4 --buffer-size 16K --retries 10 --fragment-retries 10 --socket-timeout 30 -f "${formatSelector}" --download-sections "*${startTime}-${endTime}" --no-part --no-mtime --remux-video mp4 -o "${clipPath}" "${processedVideoUrl}"`;
+                const extractorArgs = '--extractor-args "youtube:player_client=android"';
+                let baseYtDlpCommand = `yt-dlp ${extractorArgs} --no-check-certificates --ignore-errors --no-playlist -N 4 --buffer-size 16K --retries 10 --fragment-retries 10 --socket-timeout 30 -f "${formatSelector}" --download-sections "*${startTime}-${endTime}" --no-part --no-mtime --remux-video mp4 -o "${clipPath}" "${processedVideoUrl}"`;
 
                 console.log(`Executing yt-dlp for clip (capped at ${height}p): ${clip.name}`);
                 let downloadSucceeded = false;
@@ -656,13 +677,20 @@ Actor.main(async () => {
                     downloadSucceeded = false;
                 }
 
-                // Fallback: try with most compatible settings
-                if (!downloadSucceeded && enableFallbacks) {
+                // Priority mode logic: in 'quality' mode, skip compatibility fallback and go straight to full video download
+                const skipCompatibilityFallback = (priorityMode === 'quality' && !downloadSucceeded);
+                if (skipCompatibilityFallback) {
+                    console.log('[QUALITY MODE] Section download failed, skipping compatibility fallback to preserve quality');
+                    console.log('[QUALITY MODE] Will attempt full video download to guarantee requested quality');
+                }
+
+                // Fallback: try with most compatible settings (only in speed mode)
+                if (!downloadSucceeded && enableFallbacks && !skipCompatibilityFallback) {
                     console.log("Primary method failed. Attempting Fallback 1 (compatibility mode) - additional $0.09 charge will apply");
 
                     // Optimize format selector to respect quality limits, add performance optimizations
                     const height = qualityConfig.height;
-                    const baseFallbackCommand = `yt-dlp --no-check-certificates --ignore-errors --no-playlist -N 4 --buffer-size 16K --retries 10 --fragment-retries 10 --socket-timeout 30 -f "best[height<=${height}]/worst" --download-sections "*${startTime}-${endTime}" --no-part --no-mtime --remux-video mp4 -o "${clipPath}" "${processedVideoUrl}"`;
+                    const baseFallbackCommand = `yt-dlp ${extractorArgs} --no-check-certificates --ignore-errors --no-playlist -N 4 --buffer-size 16K --retries 10 --fragment-retries 10 --socket-timeout 30 -f "bestvideo[height<=${height}]+bestaudio/bestvideo+bestaudio/best[height<=${height}]/best" --download-sections "*${startTime}-${endTime}" --no-part --no-mtime --remux-video mp4 -o "${clipPath}" "${processedVideoUrl}"`;
 
                     const fallbackCommandBuilder = () => buildYtDlpCommand(baseFallbackCommand, sharedProxyUrl);
 
@@ -747,7 +775,7 @@ Actor.main(async () => {
 
                             const fullVideoPath = path.join(tempDir, `full_video_cached.%(ext)s`);
                             // Respect quality limits even for full video downloads, add performance optimizations
-                            const baseFullVideoCommand = `yt-dlp --no-check-certificates --ignore-errors -N 4 --buffer-size 16K --retries 10 --fragment-retries 10 --socket-timeout 30 -f "best[height<=${height}]/best[ext=mp4]/best" --no-part --no-mtime -o "${fullVideoPath}" "${processedVideoUrl}"`;
+                            const baseFullVideoCommand = `yt-dlp ${extractorArgs} --no-check-certificates --ignore-errors -N 4 --buffer-size 16K --retries 10 --fragment-retries 10 --socket-timeout 30 -f "bestvideo[height<=${height}]+bestaudio/bestvideo+bestaudio/best" --no-part --no-mtime -o "${fullVideoPath}" "${processedVideoUrl}"`;
 
                             const fullVideoCommandBuilder = () => buildYtDlpCommand(baseFullVideoCommand, sharedProxyUrl);
 
