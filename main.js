@@ -87,7 +87,7 @@ const timeToSeconds = (time) => {
  */
 const validateInput = (input) => {
     const errors = [];
-    const { videoUrl, clips, quality = '480p' } = input;
+    const { videoUrl, clips, quality = '360p' } = input;
 
     // Validate video URL
     if (!videoUrl || typeof videoUrl !== 'string') {
@@ -149,14 +149,14 @@ const validateInput = (input) => {
  * @param {string} quality - Quality setting (360p, 480p, 720p, 1080p)
  * @returns {Object} - Quality configuration
  */
-const getQualityConfig = (quality = '480p') => {
+const getQualityConfig = (quality = '360p') => {
     const configs = {
         '360p': { height: 360, eventName: 'clip_processed_360p' },
         '480p': { height: 480, eventName: 'clip_processed_480p' },
         '720p': { height: 720, eventName: 'clip_processed_720p' },
         '1080p': { height: 1080, eventName: 'clip_processed_1080p' }
     };
-    return configs[quality] || configs['480p'];
+    return configs[quality] || configs['360p'];
 };
 
 /**
@@ -490,7 +490,7 @@ Actor.main(async () => {
         useCookies,
         cookies,
         maxRetries = 3,
-        quality = '720p', // Quality tier for pricing and format
+        quality = '360p', // Quality tier for pricing and format
         enableFallbacks = true, // Allow expensive fallback methods
         priorityMode = 'speed' // 'speed' or 'quality' - controls download strategy
     } = input;
@@ -593,9 +593,17 @@ Actor.main(async () => {
     // Cache for full video download (shared across all clips to avoid re-downloading)
     let cachedFullVideoPath = null;
     let cachedFullVideoQuality = null;
+    let cachedFullVideoProfile = null;
 
     // Fetch video duration once for safeguard checks (lazy-loaded when needed)
     let videoDurationSeconds = null;
+
+    // Prioritized extractor profiles to maximize quality while keeping compatibility fallbacks
+    const extractorProfiles = [
+        { name: 'web', flag: '' },
+        { name: 'ios', flag: '--extractor-args "youtube:player_client=ios"' },
+        { name: 'android', flag: '--extractor-args "youtube:player_client=android"' }
+    ];
 
     try {
         // Process each clip
@@ -634,19 +642,52 @@ Actor.main(async () => {
                 // First attempt: download with resolution cap and better options
                 // Performance optimizations: concurrent fragments (-N 4), buffer size, retries, socket timeout
 
-                // Build command dynamically with current proxy URL (supports proxy rotation)
-                const buildYtDlpCommand = (baseCommand, proxyUrl) => {
-                    let cmd = baseCommand;
-                    if (cookieFilePath) cmd += ` --cookies "${cookieFilePath}"`;
-                    if (proxyUrl) cmd += ` --proxy "${proxyUrl}"`;
-                    return cmd;
+                // Build command dynamically with current proxy URL (supports proxy rotation) and extractor rotation
+                const buildYtDlpCommand = (baseArgs, extractorFlag, proxyUrl) => {
+                    const parts = ['yt-dlp'];
+                    if (extractorFlag) parts.push(extractorFlag);
+                    parts.push(baseArgs);
+                    if (cookieFilePath) parts.push(`--cookies "${cookieFilePath}"`);
+                    if (proxyUrl) parts.push(`--proxy "${proxyUrl}"`);
+                    return parts.join(' ');
                 };
 
-                const extractorArgs = '--extractor-args "youtube:player_client=android"';
-                let baseYtDlpCommand = `yt-dlp ${extractorArgs} --no-check-certificates --ignore-errors --no-playlist -N 4 --buffer-size 16K --retries 10 --fragment-retries 10 --socket-timeout 30 -f "${formatSelector}" --download-sections "*${startTime}-${endTime}" --no-part --no-mtime --remux-video mp4 -o "${clipPath}" "${processedVideoUrl}"`;
+                const onProxyRotate = async (newProxySession) => {
+                    sharedProxyUrl = newProxySession.proxyUrl;
+                    currentProxySession = newProxySession.sessionName;
+                };
+
+                const attemptDownloadWithProfiles = async (baseArgs, logSuffix, timeout, retries = maxRetries) => {
+                    let lastError = null;
+                    for (const profile of extractorProfiles) {
+                        const commandBuilder = () => buildYtDlpCommand(baseArgs, profile.flag, sharedProxyUrl);
+                        try {
+                            const label = `${clip.name}${logSuffix} [${profile.name}]`;
+                            const result = await executeWithRetry(
+                                commandBuilder,
+                                retries,
+                                timeout,
+                                label,
+                                { proxyConfiguration, onProxyRotate }
+                            );
+                            if (result) {
+                                console.log(`[DOWNLOAD] ${clip.name}${logSuffix} succeeded using extractor profile: ${profile.name}`);
+                                return { success: true, profile: profile.name };
+                            }
+                        } catch (error) {
+                            lastError = error;
+                            console.warn(`[DOWNLOAD] ${clip.name}${logSuffix} failed with extractor profile ${profile.name}: ${error.message}`);
+                        }
+                    }
+                    return { success: false, error: lastError };
+                };
+
+                const baseSectionArgs = `--no-check-certificates --ignore-errors --no-playlist -N 4 --buffer-size 16K --retries 10 --fragment-retries 10 --socket-timeout 30 -f "${formatSelector}" --download-sections "*${startTime}-${endTime}" --no-part --no-mtime --remux-video mp4 -o "${clipPath}" "${processedVideoUrl}"`;
 
                 console.log(`Executing yt-dlp for clip (capped at ${height}p): ${clip.name}`);
                 let downloadSucceeded = false;
+                let extractorProfileUsed = null;
+                let downloadStrategy = 'section_primary';
                 // Calculate adaptive timeout with optimized concurrent downloads:
                 // Normal case: duration * 2 (expect ~1x download speed with 4 concurrent fragments)
                 // Add 60s buffer for initialization + 30s per retry
@@ -655,26 +696,14 @@ Actor.main(async () => {
                 const timeoutMinutes = (adaptiveTimeout / 60000).toFixed(1);
                 console.log(`[TIMEOUT] Using ${timeoutMinutes}min timeout for ${duration}s clip (optimized with 4 concurrent fragments)`);
 
-                try {
-                    // Proxy rotation callback updates the shared proxy URL
-                    const onProxyRotate = async (newProxySession) => {
-                        sharedProxyUrl = newProxySession.proxyUrl;
-                        currentProxySession = newProxySession.sessionName;
-                    };
-
-                    // Use function to rebuild command on each attempt (allows proxy rotation)
-                    const commandBuilder = () => buildYtDlpCommand(baseYtDlpCommand, sharedProxyUrl);
-
-                    downloadSucceeded = await executeWithRetry(
-                        commandBuilder,
-                        maxRetries,
-                        adaptiveTimeout,
-                        `${clip.name} (${quality})`,
-                        { proxyConfiguration, onProxyRotate }
-                    );
-                } catch (err) {
-                    console.warn(`Resolution-capped download failed after ${maxRetries} attempts, trying without cap`);
-                    downloadSucceeded = false;
+                const sectionResult = await attemptDownloadWithProfiles(baseSectionArgs, ` (${quality})`, adaptiveTimeout);
+                downloadSucceeded = sectionResult.success;
+                extractorProfileUsed = sectionResult.profile || extractorProfileUsed;
+                if (downloadSucceeded) {
+                    downloadStrategy = 'section_primary';
+                }
+                if (!downloadSucceeded) {
+                    console.warn(`[DOWNLOAD] Primary section download failed across extractor profiles for ${clip.name}`);
                 }
 
                 // Priority mode logic: in 'quality' mode, skip compatibility fallback and go straight to full video download
@@ -686,39 +715,20 @@ Actor.main(async () => {
 
                 // Fallback: try with most compatible settings (only in speed mode)
                 if (!downloadSucceeded && enableFallbacks && !skipCompatibilityFallback) {
-                    console.log("Primary method failed. Attempting Fallback 1 (compatibility mode) - additional $0.09 charge will apply");
+                    console.log("Primary method failed. Attempting Fallback 1 (compatibility mode)...");
 
                     // Optimize format selector to respect quality limits, add performance optimizations
                     const height = qualityConfig.height;
-                    const baseFallbackCommand = `yt-dlp ${extractorArgs} --no-check-certificates --ignore-errors --no-playlist -N 4 --buffer-size 16K --retries 10 --fragment-retries 10 --socket-timeout 30 -f "bestvideo[height<=${height}]+bestaudio/bestvideo+bestaudio/best[height<=${height}]/best" --download-sections "*${startTime}-${endTime}" --no-part --no-mtime --remux-video mp4 -o "${clipPath}" "${processedVideoUrl}"`;
+                    const baseFallbackArgs = `--no-check-certificates --ignore-errors --no-playlist -N 4 --buffer-size 16K --retries 10 --fragment-retries 10 --socket-timeout 30 -f "bestvideo[height<=${height}]+bestaudio/bestvideo+bestaudio/best[height<=${height}]/best" --download-sections "*${startTime}-${endTime}" --no-part --no-mtime --remux-video mp4 -o "${clipPath}" "${processedVideoUrl}"`;
 
-                    const fallbackCommandBuilder = () => buildYtDlpCommand(baseFallbackCommand, sharedProxyUrl);
-
-                    const onProxyRotate = async (newProxySession) => {
-                        sharedProxyUrl = newProxySession.proxyUrl;
-                        currentProxySession = newProxySession.sessionName;
-                    };
-
-                    try {
-                        await executeWithRetry(
-                            fallbackCommandBuilder,
-                            maxRetries,
-                            adaptiveTimeout,
-                            `${clip.name} (fallback)`,
-                            { proxyConfiguration, onProxyRotate }
-                        );
-
-                        // Charge additional clip_processed event for fallback processing
-                        if (fs.existsSync(clipPath)) {
-                            const fallbackCharged = await chargeEvent('clip_processed');
-                            if (fallbackCharged) {
-                                console.log("Fallback 1 successful - additional processing charge ($0.09) applied");
-                            } else {
-                                console.warn("Fallback 1 successful but failed to charge additional processing fee");
-                            }
-                        }
-                    } catch (fallbackError) {
-                        console.warn(`Fallback 1 failed: ${fallbackError.message}`);
+                    const fallbackResult = await attemptDownloadWithProfiles(baseFallbackArgs, ' (fallback)', adaptiveTimeout);
+                    downloadSucceeded = fallbackResult.success;
+                    if (downloadSucceeded) {
+                        extractorProfileUsed = fallbackResult.profile || extractorProfileUsed;
+                        downloadStrategy = 'section_fallback';
+                        console.log(`[DOWNLOAD] Compatibility fallback succeeded for ${clip.name} using profile: ${fallbackResult.profile}`);
+                    } else {
+                        console.warn("Fallback 1 failed across extractor profiles");
                     }
                 } else if (!downloadSucceeded && !enableFallbacks) {
                     console.log("Primary method failed but fallbacks are disabled. Clip processing will fail.");
@@ -753,13 +763,9 @@ Actor.main(async () => {
                                 const ffmpegCommand = `ffmpeg -hide_banner -loglevel error -y -i "${cachedFullVideoPath}" -ss ${startTime} -t ${duration} -c copy "${clipPath}"`;
                                 execSync(ffmpegCommand, { stdio: 'pipe', timeout: 60000 });
                                 console.log(`Successfully extracted ${duration}s clip from cached video using ffmpeg`);
-
-                                // Charge additional clip_processed event for full video fallback processing
-                                const fallback2Charged = await chargeEvent('clip_processed');
-                                if (fallback2Charged) {
-                                    console.log("Fallback 2 successful - additional processing charge ($0.09) applied");
-                                } else {
-                                    console.warn("Fallback 2 successful but failed to charge additional processing fee");
+                                downloadStrategy = 'full_video_cache';
+                                if (!extractorProfileUsed && cachedFullVideoProfile) {
+                                    extractorProfileUsed = cachedFullVideoProfile;
                                 }
                             } catch (ffmpegError) {
                                 console.warn(`Failed to extract from cached video: ${ffmpegError.message}`);
@@ -770,32 +776,17 @@ Actor.main(async () => {
 
                         // If no cache or cache failed, download the full video
                         if (!fs.existsSync(clipPath)) {
-                            console.log("Section download failed, attempting Fallback 2 (full video download + extraction) - additional $0.09 charge will apply");
+                            console.log("Section download failed, attempting Fallback 2 (full video download + extraction)");
                             console.log("⚠️ WARNING: This method downloads the entire video and may use significant bandwidth");
 
                             const fullVideoPath = path.join(tempDir, `full_video_cached.%(ext)s`);
                             // Respect quality limits even for full video downloads, add performance optimizations
-                            const baseFullVideoCommand = `yt-dlp ${extractorArgs} --no-check-certificates --ignore-errors -N 4 --buffer-size 16K --retries 10 --fragment-retries 10 --socket-timeout 30 -f "bestvideo[height<=${height}]+bestaudio/bestvideo+bestaudio/best" --no-part --no-mtime -o "${fullVideoPath}" "${processedVideoUrl}"`;
+                            const baseFullVideoArgs = `--no-check-certificates --ignore-errors -N 4 --buffer-size 16K --retries 10 --fragment-retries 10 --socket-timeout 30 -f "bestvideo[height<=${height}]+bestaudio/bestvideo+bestaudio/best" --no-part --no-mtime -o "${fullVideoPath}" "${processedVideoUrl}"`;
 
-                            const fullVideoCommandBuilder = () => buildYtDlpCommand(baseFullVideoCommand, sharedProxyUrl);
+                            const fullVideoTimeout = 1800000; // 30 minutes max
+                            const fullVideoResult = await attemptDownloadWithProfiles(baseFullVideoArgs, ' (full video)', fullVideoTimeout, 2);
 
-                            const onProxyRotate = async (newProxySession) => {
-                                sharedProxyUrl = newProxySession.proxyUrl;
-                                currentProxySession = newProxySession.sessionName;
-                            };
-
-                            try {
-                                // For full video, need even longer timeout (up to 30 minutes for very long videos)
-                                const fullVideoTimeout = 1800000; // 30 minutes max
-                                await executeWithRetry(
-                                    fullVideoCommandBuilder,
-                                    2, // Fewer retries for full video
-                                    fullVideoTimeout,
-                                    `${clip.name} (full video)`,
-                                    { proxyConfiguration, onProxyRotate }
-                                );
-
-                                // Find the downloaded file
+                            if (fullVideoResult.success) {
                                 const downloadedFiles = fs.readdirSync(tempDir).filter(f => f.startsWith(`full_video_cached`));
                                 if (downloadedFiles.length > 0) {
                                     const fullVideoFile = path.join(tempDir, downloadedFiles[0]);
@@ -803,6 +794,7 @@ Actor.main(async () => {
                                     // Cache the full video for reuse by subsequent clips
                                     cachedFullVideoPath = fullVideoFile;
                                     cachedFullVideoQuality = height;
+                                    cachedFullVideoProfile = fullVideoResult.profile || cachedFullVideoProfile;
                                     console.log(`[CACHE] Full video downloaded and cached for reuse: ${fullVideoFile}`);
 
                                     // Extract section with ffmpeg
@@ -810,17 +802,12 @@ Actor.main(async () => {
                                     execSync(ffmpegCommand, { stdio: 'pipe', timeout: 60000 });
 
                                     console.log(`Successfully extracted ${duration}s clip using ffmpeg`);
-
-                                    // Charge additional clip_processed event for full video fallback processing
-                                    const fallback2Charged = await chargeEvent('clip_processed');
-                                    if (fallback2Charged) {
-                                        console.log("Fallback 2 successful - additional processing charge ($0.09) applied");
-                                    } else {
-                                        console.warn("Fallback 2 successful but failed to charge additional processing fee");
-                                    }
+                                    downloadStrategy = 'full_video_download';
+                                    extractorProfileUsed = fullVideoResult.profile || extractorProfileUsed;
                                 }
-                            } catch (ffmpegError) {
-                                console.warn(`Final fallback failed: ${ffmpegError.message}`);
+                            } else {
+                                const errMessage = fullVideoResult.error ? fullVideoResult.error.message : 'unknown error';
+                                console.warn(`Final fallback failed: ${errMessage}`);
                             }
                         }
                     }
@@ -880,8 +867,6 @@ Actor.main(async () => {
                     thumbnailUrl,
                     duration,
                     size: fs.statSync(clipPath).size,
-                    quality: quality,
-                    maxHeight: qualityConfig.height,
                     actualResolution: actualResolution ? actualResolution.resolution : null,
                     actualHeight: actualResolution ? actualResolution.height : null,
                     qualityWarning: qualityWarning || null,
@@ -892,7 +877,9 @@ Actor.main(async () => {
                     failed: false,
                     charged: clipCharged,
                     requestedQuality: quality,
-                    eventCharged: chargingEventName
+                    eventCharged: chargingEventName,
+                    downloadStrategy,
+                    extractorProfile: extractorProfileUsed || null
                 };
 
                 await Actor.pushData(clipData);
@@ -920,8 +907,6 @@ Actor.main(async () => {
                     thumbnailUrl: null,
                     duration: null,
                     size: null,
-                    quality: quality,
-                    maxHeight: qualityConfig.height,
                     actualResolution: null,
                     actualHeight: null,
                     qualityWarning: null,
@@ -933,6 +918,8 @@ Actor.main(async () => {
                     charged: false,
                     requestedQuality: quality,
                     eventCharged: null,
+                    downloadStrategy,
+                    extractorProfile: extractorProfileUsed || null,
                     error: error.message,
                 });
                 failedCount++;
