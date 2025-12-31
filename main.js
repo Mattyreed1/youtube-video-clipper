@@ -87,11 +87,17 @@ const timeToSeconds = (time) => {
  */
 const validateInput = (input) => {
     const errors = [];
-    const { videoUrl, clips, quality = '360p' } = input;
+    const { videoUrl, clips, sourceType = 'youtube' } = input;
 
     // Validate video URL
     if (!videoUrl || typeof videoUrl !== 'string') {
         errors.push('Video URL is required and must be a string');
+    }
+
+    // Validate source type
+    const validSourceTypes = ['youtube', 'direct_link'];
+    if (!validSourceTypes.includes(sourceType)) {
+        errors.push(`Source type must be one of: ${validSourceTypes.join(', ')}`);
     }
 
     // Validate clips array
@@ -125,12 +131,6 @@ const validateInput = (input) => {
         });
     }
 
-    // Validate quality setting
-    const validQualities = ['360p', '480p', '720p', '1080p'];
-    if (!validQualities.includes(quality)) {
-        errors.push(`Quality must be one of: ${validQualities.join(', ')}`);
-    }
-
     // Validate priorityMode setting
     const validPriorityModes = ['speed', 'quality'];
     const priorityMode = input.priorityMode || 'speed';
@@ -154,7 +154,8 @@ const getQualityConfig = (quality = '360p') => {
         '360p': { height: 360, eventName: 'clip_processed_360p' },
         '480p': { height: 480, eventName: 'clip_processed_480p' },
         '720p': { height: 720, eventName: 'clip_processed_720p' },
-        '1080p': { height: 1080, eventName: 'clip_processed_1080p' }
+        '1080p': { height: 1080, eventName: 'clip_processed_1080p' },
+        'original': { height: null, eventName: 'clip_processed_360p' } // Default for original if not detected
     };
     return configs[quality] || configs['360p'];
 };
@@ -182,15 +183,15 @@ const getChargingEvent = (requestedQuality, actualResolution) => {
     const currentDate = new Date();
     const transitionDate = new Date('2025-10-09');
 
-    // Before October 9, 2025: use current flat pricing
-    if (currentDate < transitionDate) {
-        return 'clip_processed';
-    }
-
-    // After October 9, 2025: use actual quality-based pricing
+    // After transition: use actual quality-based pricing (fair pricing)
     if (actualResolution && actualResolution.height) {
         const actualTier = getQualityTierFromHeight(actualResolution.height);
         return actualTier.eventName;
+    }
+
+    // Before October 9, 2025 (if still applicable): use current flat pricing
+    if (currentDate < transitionDate) {
+        return 'clip_processed';
     }
 
     // Fallback: use requested quality event
@@ -490,10 +491,13 @@ Actor.main(async () => {
         useCookies,
         cookies,
         maxRetries = 3,
-        quality = '360p', // Quality tier for pricing and format
         enableFallbacks = true, // Allow expensive fallback methods
-        priorityMode = 'speed' // 'speed' or 'quality' - controls download strategy
+        priorityMode = 'speed', // 'speed' or 'quality' - controls download strategy
+        sourceType = 'youtube' // 'youtube' or 'direct_link'
     } = input;
+
+    // Force quality based on source type
+    const quality = sourceType === 'youtube' ? '360p' : 'original';
 
     // Comprehensive input validation
     const validation = validateInput(input);
@@ -507,26 +511,34 @@ Actor.main(async () => {
     const currentDate = new Date();
     const transitionDate = new Date('2025-10-09');
 
+    if (sourceType === 'youtube') {
     if (currentDate < transitionDate) {
-        console.log(`Processing clips at ${quality} quality (max height: ${qualityConfig.height}px, priority: ${priorityMode}, flat cost: $0.09 per clip)`);
+            console.log(`Processing YouTube clips at 360p (flat cost: $0.09 per clip)`);
     } else {
-        console.log(`Processing clips at ${quality} quality (max height: ${qualityConfig.height}px, priority: ${priorityMode}, charged for actual quality delivered)`);
+            console.log(`Processing YouTube clips at 360p (charged for actual quality delivered)`);
+    }
+    } else {
+        console.log(`Processing Direct Link clips at original quality (charged for actual quality delivered)`);
     }
 
+    let processedVideoUrl = videoUrl;
+    if (sourceType === 'youtube') {
     // Clean and validate YouTube URL format before processing
     const urlCleaning = cleanYouTubeUrl(videoUrl);
     if (urlCleaning.error) {
-        await Actor.fail(`Invalid video URL: ${urlCleaning.error}`);
+            await Actor.fail(`Invalid YouTube video URL: ${urlCleaning.error}`);
         return;
     }
 
     // Use cleaned URL if parameters were removed
-    let processedVideoUrl = videoUrl;
     if (urlCleaning.removedParams.length > 0) {
         processedVideoUrl = urlCleaning.cleanedUrl;
-        console.log(`Cleaned video URL by removing parameters: ${urlCleaning.removedParams.join(', ')}`);
+            console.log(`Cleaned YouTube video URL by removing parameters: ${urlCleaning.removedParams.join(', ')}`);
         console.log(`Original URL: ${videoUrl}`);
         console.log(`Cleaned URL: ${processedVideoUrl}`);
+        }
+    } else {
+        console.log(`Using Direct Link: ${videoUrl}`);
     }
 
     // Charge for run_started event immediately
@@ -599,10 +611,13 @@ Actor.main(async () => {
     let videoDurationSeconds = null;
 
     // Prioritized extractor profiles to maximize quality while keeping compatibility fallbacks
-    const extractorProfiles = [
+    // Only used for YouTube sources
+    const extractorProfiles = sourceType === 'youtube' ? [
         { name: 'web', flag: '' },
         { name: 'ios', flag: '--extractor-args "youtube:player_client=ios"' },
         { name: 'android', flag: '--extractor-args "youtube:player_client=android"' }
+    ] : [
+        { name: 'direct', flag: '' }
     ];
 
     try {
@@ -634,7 +649,9 @@ Actor.main(async () => {
 
                 // Use quality-based resolution selection with better format fallbacks
                 const height = qualityConfig.height;
-                const formatSelector = `bestvideo[height<=${height}]+bestaudio/best[height<=${height}][ext=mp4]/best[ext=mp4]/best`;
+                const formatSelector = sourceType === 'youtube' 
+                    ? `bestvideo[height<=${height}]+bestaudio/best[height<=${height}][ext=mp4]/best[ext=mp4]/best`
+                    : `best`;
 
                 // Prepare file paths
                 clipPath = path.join(tempDir, `${clipIdentifier}.mp4`);
@@ -647,7 +664,7 @@ Actor.main(async () => {
                     const parts = ['yt-dlp'];
                     if (extractorFlag) parts.push(extractorFlag);
                     parts.push(baseArgs);
-                    if (cookieFilePath) parts.push(`--cookies "${cookieFilePath}"`);
+                    if (sourceType === 'youtube' && cookieFilePath) parts.push(`--cookies "${cookieFilePath}"`);
                     if (proxyUrl) parts.push(`--proxy "${proxyUrl}"`);
                     return parts.join(' ');
                 };
@@ -682,28 +699,28 @@ Actor.main(async () => {
                     return { success: false, error: lastError };
                 };
 
-                const baseSectionArgs = `--no-check-certificates --ignore-errors --no-playlist -N 4 --buffer-size 16K --retries 10 --fragment-retries 10 --socket-timeout 30 -f "${formatSelector}" --download-sections "*${startTime}-${endTime}" --no-part --no-mtime --remux-video mp4 -o "${clipPath}" "${processedVideoUrl}"`;
+                    const baseSectionArgs = `--no-check-certificates --ignore-errors --no-playlist -N 4 --buffer-size 16K --retries 10 --fragment-retries 10 --socket-timeout 30 -f "${formatSelector}" --download-sections "*${startTime}-${endTime}" --no-part --no-mtime --remux-video mp4 -o "${clipPath}" "${processedVideoUrl}"`;
 
-                console.log(`Executing yt-dlp for clip (capped at ${height}p): ${clip.name}`);
+                    console.log(`Executing yt-dlp for clip (capped at ${height}p): ${clip.name}`);
                 let downloadSucceeded = false;
                 let extractorProfileUsed = null;
                 let downloadStrategy = 'section_primary';
-                // Calculate adaptive timeout with optimized concurrent downloads:
-                // Normal case: duration * 2 (expect ~1x download speed with 4 concurrent fragments)
-                // Add 60s buffer for initialization + 30s per retry
-                // Min 3min for small clips, max 12min for large clips or network issues
-                const adaptiveTimeout = Math.max(180000, Math.min((duration * 2 + 60) * 1000, 720000));
-                const timeoutMinutes = (adaptiveTimeout / 60000).toFixed(1);
-                console.log(`[TIMEOUT] Using ${timeoutMinutes}min timeout for ${duration}s clip (optimized with 4 concurrent fragments)`);
+                    // Calculate adaptive timeout with optimized concurrent downloads:
+                    // Normal case: duration * 2 (expect ~1x download speed with 4 concurrent fragments)
+                    // Add 60s buffer for initialization + 30s per retry
+                    // Min 3min for small clips, max 12min for large clips or network issues
+                    const adaptiveTimeout = Math.max(180000, Math.min((duration * 2 + 60) * 1000, 720000));
+                    const timeoutMinutes = (adaptiveTimeout / 60000).toFixed(1);
+                    console.log(`[TIMEOUT] Using ${timeoutMinutes}min timeout for ${duration}s clip (optimized with 4 concurrent fragments)`);
 
-                const sectionResult = await attemptDownloadWithProfiles(baseSectionArgs, ` (${quality})`, adaptiveTimeout);
-                downloadSucceeded = sectionResult.success;
-                extractorProfileUsed = sectionResult.profile || extractorProfileUsed;
-                if (downloadSucceeded) {
-                    downloadStrategy = 'section_primary';
-                }
-                if (!downloadSucceeded) {
-                    console.warn(`[DOWNLOAD] Primary section download failed across extractor profiles for ${clip.name}`);
+                    const sectionResult = await attemptDownloadWithProfiles(baseSectionArgs, ` (${quality})`, adaptiveTimeout);
+                    downloadSucceeded = sectionResult.success;
+                    extractorProfileUsed = sectionResult.profile || extractorProfileUsed;
+                    if (downloadSucceeded) {
+                        downloadStrategy = 'section_primary';
+                    }
+                    if (!downloadSucceeded) {
+                        console.warn(`[DOWNLOAD] Primary section download failed across extractor profiles for ${clip.name}`);
                 }
 
                 // Priority mode logic: in 'quality' mode, skip compatibility fallback and go straight to full video download
@@ -719,7 +736,11 @@ Actor.main(async () => {
 
                     // Optimize format selector to respect quality limits, add performance optimizations
                     const height = qualityConfig.height;
-                    const baseFallbackArgs = `--no-check-certificates --ignore-errors --no-playlist -N 4 --buffer-size 16K --retries 10 --fragment-retries 10 --socket-timeout 30 -f "bestvideo[height<=${height}]+bestaudio/bestvideo+bestaudio/best[height<=${height}]/best" --download-sections "*${startTime}-${endTime}" --no-part --no-mtime --remux-video mp4 -o "${clipPath}" "${processedVideoUrl}"`;
+                    const fallbackFormatSelector = sourceType === 'youtube'
+                        ? `bestvideo[height<=${height}]+bestaudio/bestvideo+bestaudio/best[height<=${height}]/best`
+                        : `best`;
+
+                    const baseFallbackArgs = `--no-check-certificates --ignore-errors --no-playlist -N 4 --buffer-size 16K --retries 10 --fragment-retries 10 --socket-timeout 30 -f "${fallbackFormatSelector}" --download-sections "*${startTime}-${endTime}" --no-part --no-mtime --remux-video mp4 -o "${clipPath}" "${processedVideoUrl}"`;
 
                     const fallbackResult = await attemptDownloadWithProfiles(baseFallbackArgs, ' (fallback)', adaptiveTimeout);
                     downloadSucceeded = fallbackResult.success;
@@ -781,7 +802,11 @@ Actor.main(async () => {
 
                             const fullVideoPath = path.join(tempDir, `full_video_cached.%(ext)s`);
                             // Respect quality limits even for full video downloads, add performance optimizations
-                            const baseFullVideoArgs = `--no-check-certificates --ignore-errors -N 4 --buffer-size 16K --retries 10 --fragment-retries 10 --socket-timeout 30 -f "bestvideo[height<=${height}]+bestaudio/bestvideo+bestaudio/best" --no-part --no-mtime -o "${fullVideoPath}" "${processedVideoUrl}"`;
+                            const fullVideoFormatSelector = sourceType === 'youtube'
+                                ? `bestvideo[height<=${height}]+bestaudio/bestvideo+bestaudio/best`
+                                : `best`;
+                            
+                            const baseFullVideoArgs = `--no-check-certificates --ignore-errors -N 4 --buffer-size 16K --retries 10 --fragment-retries 10 --socket-timeout 30 -f "${fullVideoFormatSelector}" --no-part --no-mtime -o "${fullVideoPath}" "${processedVideoUrl}"`;
 
                             const fullVideoTimeout = 1800000; // 30 minutes max
                             const fullVideoResult = await attemptDownloadWithProfiles(baseFullVideoArgs, ' (full video)', fullVideoTimeout, 2);
@@ -873,6 +898,7 @@ Actor.main(async () => {
                     outputFormat: 'mp4',
                     clipIndex: index + 1,
                     videoUrl: processedVideoUrl,
+                    sourceType,
                     processingTime: new Date().toISOString(),
                     failed: false,
                     charged: clipCharged,
@@ -913,6 +939,7 @@ Actor.main(async () => {
                     outputFormat: 'mp4',
                     clipIndex: index + 1,
                     videoUrl: processedVideoUrl,
+                    sourceType,
                     processingTime: new Date().toISOString(),
                     failed: true,
                     charged: false,
@@ -975,6 +1002,7 @@ Actor.main(async () => {
         runStartCharged,
         runFinished: new Date().toISOString(),
         qualityUsed: quality,
+        sourceType,
         resumedFromPrevious: savedProgress !== null
     };
     await Actor.pushData({ '#summary': true, ...summary });

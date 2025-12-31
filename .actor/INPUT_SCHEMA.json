@@ -4,12 +4,20 @@
   "schemaVersion": 1,
   "properties": {
     "videoUrl": {
-      "title": "YouTube Video URL",
+      "title": "Video URL",
       "type": "string",
-      "description": "The YouTube video URL to download and extract clips from.\n\n🔧 TROUBLESHOOTING ORDER:\n1. Try with just the URL first\n2. If rate limited → Enable Proxy\n3. If \"video unavailable\" → Add Cookies\n4. For maximum reliability → Use both",
+      "description": "The URL of the video to download and extract clips from.\n\n🔧 SOURCES:\n- YouTube (fixed at 360p)\n- Direct Link (e.g. .mp4, .mkv, .mov - as-is quality)",
       "editor": "textfield",
       "example": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
       "prefill": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    },
+    "sourceType": {
+      "title": "Video Source Type",
+      "type": "string",
+      "description": "Choose whether you are clipping from a YouTube video (restricted to 360p) or a direct video link (as-is quality).",
+      "enum": ["youtube", "direct_link"],
+      "enumTitles": ["YouTube Video (360p)", "Direct Video Link (As-is)"],
+      "default": "youtube"
     },
     "clips": {
       "title": "Clips to Extract",
@@ -41,14 +49,6 @@
       "default": 3,
       "minimum": 1,
       "maximum": 10
-    },
-    "quality": {
-      "title": "Video Quality & Pricing Tier",
-      "type": "string",
-      "description": "Choose video quality tier. Starting Oct 9, 2025: you pay only for the quality actually delivered. Before then: flat $0.09 rate.",
-      "enum": ["360p", "480p", "720p", "1080p"],
-      "enumTitles": ["360p - $0.07 (Basic)", "480p - $0.09 (Standard)", "720p - $0.29 (Recommended)", "1080p - $0.39 (Premium)"],
-      "default": "720p"
     },
     "enableFallbacks": {
       "title": "Enable Fallback Methods",
