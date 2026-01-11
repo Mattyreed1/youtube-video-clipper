@@ -633,6 +633,8 @@ Actor.main(async () => {
 
             let clipPath = null;
             let thumbnailPath = null;
+            let downloadStrategy = 'section_primary';
+            let extractorProfileUsed = null;
             console.log(`Processing ${clipIdentifier}... (${index + 1}/${clips.length})`);
 
             try {
@@ -703,8 +705,6 @@ Actor.main(async () => {
 
                     console.log(`Executing yt-dlp for clip (capped at ${height}p): ${clip.name}`);
                 let downloadSucceeded = false;
-                let extractorProfileUsed = null;
-                let downloadStrategy = 'section_primary';
                     // Calculate adaptive timeout with optimized concurrent downloads:
                     // Normal case: duration * 2 (expect ~1x download speed with 4 concurrent fragments)
                     // Add 60s buffer for initialization + 30s per retry
